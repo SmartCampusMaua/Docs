@@ -16,6 +16,9 @@ apt-get install vim
 
 
 
+![Name](/Docker/_lib/img/_)
+
+
 A imagem no docker é imutável e nao conseguimos escrever no container em execução!
 -v Cria a pasta na máquina host mesmo que ela nao exista (old)
 
