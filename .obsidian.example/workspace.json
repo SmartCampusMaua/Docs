@@ -11,8 +11,12 @@
             "id": "3dcfa9ba510af5ce",
             "type": "leaf",
             "state": {
-              "type": "empty",
-              "state": {}
+              "type": "markdown",
+              "state": {
+                "file": "README.md",
+                "mode": "source",
+                "source": false
+              }
             }
           }
         ]
@@ -81,6 +85,7 @@
             "state": {
               "type": "backlink",
               "state": {
+                "file": "README.md",
                 "collapseAll": false,
                 "extraContext": false,
                 "sortOrder": "alphabetical",
@@ -97,6 +102,7 @@
             "state": {
               "type": "outgoing-link",
               "state": {
+                "file": "README.md",
                 "linksCollapsed": false,
                 "unlinkedCollapsed": true
               }
@@ -118,7 +124,9 @@
             "type": "leaf",
             "state": {
               "type": "outline",
-              "state": {}
+              "state": {
+                "file": "README.md"
+              }
             }
           }
         ]
@@ -138,18 +146,23 @@
       "command-palette:Open command palette": false
     }
   },
-  "active": "0e7aca2299060e69",
+  "active": "3dcfa9ba510af5ce",
   "lastOpenFiles": [
+    "_Template/README.md",
+    "README.md",
+    "Git/README.md",
+    "Docker/How to.md",
+    "_Template/_lib/img",
+    "_Template/_lib/excalidraw",
+    "_Template/_lib",
+    "_Template",
+    "Git/_lib/img",
+    "Git/_lib/excalidraw",
+    "Git/_lib",
+    "Git",
     "Docker/_lib",
     "Docker/_lib/img",
-    "Docker/_lib/excalidraw",
-    "Docker/How to.md",
-    "README.md",
-    "Docker",
     "Tools/Excalidraw/Plugins/README.md.md",
-    "Tools/Excalidraw/README.md.md",
-    "Tools/Excalidraw/Plugins",
-    "Tools/Excalidraw",
-    "Tools"
+    "Tools/Excalidraw/README.md.md"
   ]
 }
