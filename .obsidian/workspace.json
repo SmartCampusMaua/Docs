@@ -13,7 +13,7 @@
             "state": {
               "type": "markdown",
               "state": {
-                "file": "_Template/README.md",
+                "file": "README.md",
                 "mode": "source",
                 "source": false
               }
@@ -85,7 +85,7 @@
             "state": {
               "type": "backlink",
               "state": {
-                "file": "_Template/README.md",
+                "file": "README.md",
                 "collapseAll": false,
                 "extraContext": false,
                 "sortOrder": "alphabetical",
@@ -102,7 +102,7 @@
             "state": {
               "type": "outgoing-link",
               "state": {
-                "file": "_Template/README.md",
+                "file": "README.md",
                 "linksCollapsed": false,
                 "unlinkedCollapsed": true
               }
@@ -125,7 +125,7 @@
             "state": {
               "type": "outline",
               "state": {
-                "file": "_Template/README.md"
+                "file": "README.md"
               }
             }
           }
@@ -148,9 +148,9 @@
   },
   "active": "3dcfa9ba510af5ce",
   "lastOpenFiles": [
-    "README.md",
     "_Template/README.md",
     "Git/README.md",
+    "README.md",
     "Docker/How to.md",
     "_Template/_lib/img",
     "_Template/_lib/excalidraw",
