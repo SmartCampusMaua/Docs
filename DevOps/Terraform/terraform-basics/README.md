@@ -2764,8 +2764,2973 @@ Foram criadas agora as duas policies!
 
 
 ## Cluster EKS no ar
+Na aula passada criamos uma role e atachamos duas policies que sao o resource control e o resource policy para que k8s possa trabalhar e criar as maquinas usando o terraform
+
+Agora vamos criar o nosso cluster. Uma coisa que nao podemos abrir mao é de log. E para isso vamos utilizar o AWS Cloud Watch.
+
+
+Em variables.tf:
+```tf
+variable "prefix" {}
+variable "cluster_name" {}
+variable "retention_days" {}
+```
+
+Em terraform.tfvars:
+```tfvars
+prefix = "fullcycle"
+cluster_name = "fc_course"
+retention_days = 30
+```
+
+Em cluster.tf
+```tf
+resource "aws_security_group" "sg" {
+  vpc_id = aws_vpc.new-vpc.id
+  egress {
+    from_port = 0
+    to_port = 0
+    protocol = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+    prefix_list_ids = []
+  }
+  tags = {
+    Name = "${var.prefix}-sg"
+  }
+}
+
+resource "aws_iam_role" "cluster" {
+  name = "${var.prefix}-${var.cluster_name}-role"
+  assume_role_policy = <<POLICY
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Principal": {
+        "Service": "eks.amazonaws.com"
+      },
+      "Action": "sts:AssumeRole"
+    }
+  ]
+}
+POLICY
+}
+
+resource "aws_iam_role_policy_attachment" "cluster-AmazonEKSVPCResourceController" {
+  role = aws_iam_role.cluster.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEKSVPCResourceController"
+}
+
+resource "aws_iam_role_policy_attachment" "cluster-AmazonEKSClusterPolicy" {
+  role = aws_iam_role.cluster.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEKSClusterPolicy"
+}
+
+resource "aws_cloudwatch_log_group" "log" {
+  name = "/aws/eks/${var.prefix}-${var.cluster_name}/cluster"
+  retention_in_days = var.retention_days
+}
+```
+
+Agora vamos criar o Cluster em si. No EKS da AWS, temos um Cluster, que possui um grupo de Nodes (Node groups) como limite de escala e capacidades computacionais. , que possuem as nossas máquinas com capacidades diferentes.
+
+
+O nosso cluster vai ter uma role e agora ele vai poder executar todas as policies que foram atachadas nessa role!
+
+```tf
+resource "aws_security_group" "sg" {
+  vpc_id = aws_vpc.new-vpc.id
+  egress {
+    from_port = 0
+    to_port = 0
+    protocol = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+    prefix_list_ids = []
+  }
+  tags = {
+    Name = "${var.prefix}-sg"
+  }
+}
+
+resource "aws_iam_role" "cluster" {
+  name = "${var.prefix}-${var.cluster_name}-role"
+  assume_role_policy = <<POLICY
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Principal": {
+        "Service": "eks.amazonaws.com"
+      },
+      "Action": "sts:AssumeRole"
+    }
+  ]
+}
+POLICY
+}
+
+resource "aws_iam_role_policy_attachment" "cluster-AmazonEKSVPCResourceController" {
+  role = aws_iam_role.cluster.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEKSVPCResourceController"
+}
+
+resource "aws_iam_role_policy_attachment" "cluster-AmazonEKSClusterPolicy" {
+  role = aws_iam_role.cluster.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEKSClusterPolicy"
+}
+
+resource "aws_cloudwatch_log_group" "log" {
+  name = "/aws/eks/${var.prefix}-${var.cluster_name}/cluster"
+  retention_in_days = var.retention_days
+}
+
+resource "aws_eks_cluster" "cluster" {
+  name = "${var.prefix}-${var.cluster_name}"
+  role_arn = aws_iam_role.cluster.arn
+  enabled_cluster_log_types = ["api", "audit"]
+  vpc_config {
+    subnet_ids = aws_subnet.subnets[*].id
+    security_group_ids = [aws_security_group.sg.id]
+  }
+  depends_on = [ 
+    aws_cloudwatch_log_group.log,
+    aws_iam_role_policy_attachment.cluster-AmazonEKSVPCResourceController,
+    aws_iam_role_policy_attachment.cluster-AmazonEKSClusterPolicy,
+  ]
+}
+```
+
+Vamos aplicar!
+```bash
+❯ terraform apply --auto-approve
+data.aws_availability_zones.available: Reading...
+aws_vpc.new-vpc: Refreshing state... [id=vpc-0270a43b02cf93e62]
+aws_iam_role.cluster: Refreshing state... [id=fullcycle-fc_course-role]
+data.aws_availability_zones.available: Read complete after 0s [id=us-east-1]
+aws_iam_role_policy_attachment.cluster-AmazonEKSVPCResourceController: Refreshing state... [id=fullcycle-fc_course-role-20231228213311474100000001]
+aws_iam_role_policy_attachment.cluster-AmazonEKSClusterPolicy: Refreshing state... [id=fullcycle-fc_course-role-20231228213737664400000001]
+aws_subnet.subnets[0]: Refreshing state... [id=subnet-01be84e8f03bc3b03]
+aws_internet_gateway.new-igw: Refreshing state... [id=igw-0b401a42be706ee70]
+aws_subnet.subnets[1]: Refreshing state... [id=subnet-0790eb91c54315d67]
+aws_security_group.sg: Refreshing state... [id=sg-094df25f9931ad7f9]
+aws_route_table.new-rtb: Refreshing state... [id=rtb-07e07bf5de48b5157]
+aws_route_table_association.new-rtb-association[0]: Refreshing state... [id=rtbassoc-07c72896aad74cb06]
+aws_route_table_association.new-rtb-association[1]: Refreshing state... [id=rtbassoc-0738acac44b984c59]
+
+Terraform used the selected providers to generate the following execution plan. Resource actions are indicated
+with the following symbols:
+  + create
+
+Terraform will perform the following actions:
+
+  # aws_cloudwatch_log_group.log will be created
+  + resource "aws_cloudwatch_log_group" "log" {
+      + arn               = (known after apply)
+      + id                = (known after apply)
+      + log_group_class   = (known after apply)
+      + name              = "/aws/eks/fullcycle-fc_course/cluster"
+      + name_prefix       = (known after apply)
+      + retention_in_days = 30
+      + skip_destroy      = false
+      + tags_all          = (known after apply)
+    }
+
+  # aws_eks_cluster.cluster will be created
+  + resource "aws_eks_cluster" "cluster" {
+      + arn                       = (known after apply)
+      + certificate_authority     = (known after apply)
+      + cluster_id                = (known after apply)
+      + created_at                = (known after apply)
+      + enabled_cluster_log_types = [
+          + "api",
+          + "audit",
+        ]
+      + endpoint                  = (known after apply)
+      + id                        = (known after apply)
+      + identity                  = (known after apply)
+      + name                      = "fullcycle-fc_course"
+      + platform_version          = (known after apply)
+      + role_arn                  = "arn:aws:iam::000143974429:role/fullcycle-fc_course-role"
+      + status                    = (known after apply)
+      + tags_all                  = (known after apply)
+      + version                   = (known after apply)
+
+      + vpc_config {
+          + cluster_security_group_id = (known after apply)
+          + endpoint_private_access   = false
+          + endpoint_public_access    = true
+          + public_access_cidrs       = (known after apply)
+          + security_group_ids        = [
+              + "sg-094df25f9931ad7f9",
+            ]
+          + subnet_ids                = [
+              + "subnet-01be84e8f03bc3b03",
+              + "subnet-0790eb91c54315d67",
+            ]
+          + vpc_id                    = (known after apply)
+        }
+    }
+
+Plan: 2 to add, 0 to change, 0 to destroy.
+aws_cloudwatch_log_group.log: Creating...
+aws_cloudwatch_log_group.log: Creation complete after 1s [id=/aws/eks/fullcycle-fc_course/cluster]
+aws_eks_cluster.cluster: Creating...
+
+aws_eks_cluster.cluster: Creation complete after 9m17s [id=fullcycle-fc_course]
+
+Apply complete! Resources: 2 added, 0 changed, 0 destroyed.
+```
+
+O Cluster na AWS demora um pouco para criar, 10 min. 
+
+Mas acessando o Console -> EKS, já podemos ver algumas coisas acontecendo como o nome do cluster. 
+
+
+## Criando Workers para o Cluster
+
+Entrando nos detalhes do cluster crido no console, na Aba Compote nao há nada ainda! 
+O Compute eh um Node Grpup com as config maximo e minimo com cada especificaçao de maquina.
+
+Vamos criar o Node Group e nesse Node Group vamos criar essas maquinas!
+JAMAIS ATUALIZE OU FAÇA CONFIG NO CONSOLE QUANDO MEXENDO COM O TERRAFORM!
+
+Vamos criar um novo arquivo para separar a complexidade nodes.tf
+```tf
+resource "aws_iam_role" "node" {
+  name = "${var.prefix}-${var.cluster_name}-role-node"
+  assume_role_policy = <<POLICY
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Principal": {
+        "Service": "ec2.amazonaws.com"
+      },
+      "Action": "sts:AssumeRole"
+    }
+  ]
+}
+POLICY
+}
+```
+
+E vamos subir na AWS!
+
+
+```bash
+❯ terraform apply --auto-approve
+data.aws_availability_zones.available: Reading...
+aws_cloudwatch_log_group.log: Refreshing state... [id=/aws/eks/fullcycle-fc_course/cluster]
+aws_vpc.new-vpc: Refreshing state... [id=vpc-0270a43b02cf93e62]
+aws_iam_role.cluster: Refreshing state... [id=fullcycle-fc_course-role]
+data.aws_availability_zones.available: Read complete after 1s [id=us-east-1]
+aws_iam_role_policy_attachment.cluster-AmazonEKSClusterPolicy: Refreshing state... [id=fullcycle-fc_course-role-20231228213737664400000001]
+aws_iam_role_policy_attachment.cluster-AmazonEKSVPCResourceController: Refreshing state... [id=fullcycle-fc_course-role-20231228213311474100000001]
+aws_internet_gateway.new-igw: Refreshing state... [id=igw-0b401a42be706ee70]
+aws_subnet.subnets[0]: Refreshing state... [id=subnet-01be84e8f03bc3b03]
+aws_subnet.subnets[1]: Refreshing state... [id=subnet-0790eb91c54315d67]
+aws_security_group.sg: Refreshing state... [id=sg-094df25f9931ad7f9]
+aws_route_table.new-rtb: Refreshing state... [id=rtb-07e07bf5de48b5157]
+aws_route_table_association.new-rtb-association[1]: Refreshing state... [id=rtbassoc-0738acac44b984c59]
+aws_route_table_association.new-rtb-association[0]: Refreshing state... [id=rtbassoc-07c72896aad74cb06]
+aws_eks_cluster.cluster: Refreshing state... [id=fullcycle-fc_course]
+
+Terraform used the selected providers to generate the following execution plan. Resource actions are indicated
+with the following symbols:
+  + create
+
+Terraform will perform the following actions:
+
+  # aws_iam_role.node will be created
+  + resource "aws_iam_role" "node" {
+      + arn                   = (known after apply)
+      + assume_role_policy    = jsonencode(
+            {
+              + Statement = [
+                  + {
+                      + Action    = "sts:AssumeRole"
+                      + Effect    = "Allow"
+                      + Principal = {
+                          + Service = "ec2.amazonaws.com"
+                        }
+                    },
+                ]
+              + Version   = "2012-10-17"
+            }
+        )
+      + create_date           = (known after apply)
+      + force_detach_policies = false
+      + id                    = (known after apply)
+      + managed_policy_arns   = (known after apply)
+      + max_session_duration  = 3600
+      + name                  = "fullcycle-fc_course-role-node"
+      + name_prefix           = (known after apply)
+      + path                  = "/"
+      + tags_all              = (known after apply)
+      + unique_id             = (known after apply)
+    }
+
+Plan: 1 to add, 0 to change, 0 to destroy.
+aws_iam_role.node: Creating...
+aws_iam_role.node: Creation complete after 1s [id=fullcycle-fc_course-role-node]
+
+Apply complete! Resources: 1 added, 0 changed, 0 destroyed.
+```
+
+Criamos a role!
+
+Vamos no console -> iam -> roles
+fullcycle-fc_course-role-node	Serviço da AWS: ec2   -
+
+E criou!
+
+E vamos atachar algumas policies dentro dessa role!
+
+Worker node vai rodar no cluster uma maquina como node
+CNI é o que permite a comunicaçao entre os nodes do k8s
+ReadOnly significa que a maquina vai ter que ter permissao para o container registry da aws e colcoar para funcionar.
+```tf
+resource "aws_iam_role" "node" {
+  name = "${var.prefix}-${var.cluster_name}-role-node"
+  assume_role_policy = <<POLICY
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Principal": {
+        "Service": "ec2.amazonaws.com"
+      },
+      "Action": "sts:AssumeRole"
+    }
+  ]
+}
+POLICY
+}
+
+resource "aws_iam_role_policy_attachment" "node-AmazonEKSWorkerNodePolicy" {
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy"
+  role = aws_iam_role.node.name
+}
+
+resource "aws_iam_role_policy_attachment" "node-AmazonEKS_CNI_Policy" {
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy"
+  role = aws_iam_role.node.name
+}
+
+resource "aws_iam_role_policy_attachment" "node-AmazonEC2ContainerRegistryReadOnly" {
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly"
+  role = aws_iam_role.node.name
+}
+```
+
+Vamos aplicar!
+```bash
+❯ terraform apply --auto-approve
+data.aws_availability_zones.available: Reading...
+aws_cloudwatch_log_group.log: Refreshing state... [id=/aws/eks/fullcycle-fc_course/cluster]
+aws_iam_role.node: Refreshing state... [id=fullcycle-fc_course-role-node]
+aws_iam_role.cluster: Refreshing state... [id=fullcycle-fc_course-role]
+aws_vpc.new-vpc: Refreshing state... [id=vpc-0270a43b02cf93e62]
+data.aws_availability_zones.available: Read complete after 1s [id=us-east-1]
+aws_iam_role_policy_attachment.cluster-AmazonEKSVPCResourceController: Refreshing state... [id=fullcycle-fc_course-role-20231228213311474100000001]
+aws_iam_role_policy_attachment.cluster-AmazonEKSClusterPolicy: Refreshing state... [id=fullcycle-fc_course-role-20231228213737664400000001]
+aws_internet_gateway.new-igw: Refreshing state... [id=igw-0b401a42be706ee70]
+aws_subnet.subnets[0]: Refreshing state... [id=subnet-01be84e8f03bc3b03]
+aws_subnet.subnets[1]: Refreshing state... [id=subnet-0790eb91c54315d67]
+aws_security_group.sg: Refreshing state... [id=sg-094df25f9931ad7f9]
+aws_route_table.new-rtb: Refreshing state... [id=rtb-07e07bf5de48b5157]
+aws_route_table_association.new-rtb-association[1]: Refreshing state... [id=rtbassoc-0738acac44b984c59]
+aws_route_table_association.new-rtb-association[0]: Refreshing state... [id=rtbassoc-07c72896aad74cb06]
+aws_eks_cluster.cluster: Refreshing state... [id=fullcycle-fc_course]
+
+Terraform used the selected providers to generate the following execution plan. Resource actions are indicated
+with the following symbols:
+  + create
+
+Terraform will perform the following actions:
+
+  # aws_iam_role_policy_attachment.node-AmazonEC2ContainerRegistryReadOnly will be created
+  + resource "aws_iam_role_policy_attachment" "node-AmazonEC2ContainerRegistryReadOnly" {
+      + id         = (known after apply)
+      + policy_arn = "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly"
+      + role       = "fullcycle-fc_course-role-node"
+    }
+
+  # aws_iam_role_policy_attachment.node-AmazonEKSWorkerNodePolicy will be created
+  + resource "aws_iam_role_policy_attachment" "node-AmazonEKSWorkerNodePolicy" {
+      + id         = (known after apply)
+      + policy_arn = "arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy"
+      + role       = "fullcycle-fc_course-role-node"
+    }
+
+  # aws_iam_role_policy_attachment.node-AmazonEKS_CNI_Policy will be created
+  + resource "aws_iam_role_policy_attachment" "node-AmazonEKS_CNI_Policy" {
+      + id         = (known after apply)
+      + policy_arn = "arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy"
+      + role       = "fullcycle-fc_course-role-node"
+    }
+
+Plan: 3 to add, 0 to change, 0 to destroy.
+aws_iam_role_policy_attachment.node-AmazonEC2ContainerRegistryReadOnly: Creating...
+aws_iam_role_policy_attachment.node-AmazonEKSWorkerNodePolicy: Creating...
+aws_iam_role_policy_attachment.node-AmazonEKS_CNI_Policy: Creating...
+aws_iam_role_policy_attachment.node-AmazonEKSWorkerNodePolicy: Creation complete after 0s [id=fullcycle-fc_course-role-node-20240103195149143600000001]
+aws_iam_role_policy_attachment.node-AmazonEC2ContainerRegistryReadOnly: Creation complete after 0s [id=fullcycle-fc_course-role-node-20240103195149151600000002]
+aws_iam_role_policy_attachment.node-AmazonEKS_CNI_Policy: Creation complete after 0s [id=fullcycle-fc_course-role-node-20240103195149330100000003]
+
+Apply complete! Resources: 3 added, 0 changed, 0 destroyed.
+```
+
+Agora temos as nossas roles e policies.
+
+Vamos criar agora o NodeGrpup!
+
+Primeiramente, criar variáveis:
+variables.tf
+```tf
+variable "prefix" {}
+variable "cluster_name" {}
+variable "retention_days" {}
+variable "desired_size" {}
+variable "max_size" {}
+variable "min_size" {}
+```
+
+terraform.tfvars
+```tfvars
+prefix = "fullcycle"
+cluster_name = "fc_course"
+retention_days = 30
+desired_size = 2
+max_size = 4
+min_size = 2
+```
+
+Entao vamos ter o nosso cluster com as maquinas com essas permissoes e esses tamanhos
+
+Em nodes.tf
+```tf
+resource "aws_iam_role" "node" {
+  name = "${var.prefix}-${var.cluster_name}-role-node"
+  assume_role_policy = <<POLICY
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Principal": {
+        "Service": "ec2.amazonaws.com"
+      },
+      "Action": "sts:AssumeRole"
+    }
+  ]
+}
+POLICY
+}
+
+resource "aws_iam_role_policy_attachment" "node-AmazonEKSWorkerNodePolicy" {
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy"
+  role = aws_iam_role.node.name
+}
+
+resource "aws_iam_role_policy_attachment" "node-AmazonEKS_CNI_Policy" {
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy"
+  role = aws_iam_role.node.name
+}
+
+resource "aws_iam_role_policy_attachment" "node-AmazonEC2ContainerRegistryReadOnly" {
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly"
+  role = aws_iam_role.node.name
+}
+
+resource "aws_eks_node_group" "node-1" {
+  cluster_name = aws_eks_cluster.cluster.name
+  node_group_name = "node-1"
+  node_role_arn = aws_iam_role.node.arn
+  subnet_ids = aws_subnet.subnets[*].id
+
+  scaling_config {
+    desired_size = var.desired_size
+    max_size = var.max_size
+    min_size = var.min_size
+  }
+  depends_on = [ 
+    aws_iam_role_policy_attachment.node-AmazonEKSWorkerNodePolicy,
+    aws_iam_role_policy_attachment.node-AmazonEKS_CNI_Policy,
+    aws_iam_role_policy_attachment.node-AmazonEC2ContainerRegistryReadOnly,
+  ]
+}
+```
+
+E vamos aplicar para criar a nossa maquina.
+A boa noticia eh que cria bem mais rapido. A ma noticia eh que nao eh tao rapido
+```bash
+❯ terraform apply --auto-approve
+data.aws_availability_zones.available: Reading...
+aws_iam_role.node: Refreshing state... [id=fullcycle-fc_course-role-node]
+aws_cloudwatch_log_group.log: Refreshing state... [id=/aws/eks/fullcycle-fc_course/cluster]
+aws_vpc.new-vpc: Refreshing state... [id=vpc-0270a43b02cf93e62]
+aws_iam_role.cluster: Refreshing state... [id=fullcycle-fc_course-role]
+data.aws_availability_zones.available: Read complete after 1s [id=us-east-1]
+aws_iam_role_policy_attachment.node-AmazonEC2ContainerRegistryReadOnly: Refreshing state... [id=fullcycle-fc_course-role-node-20240103195149151600000002]
+aws_iam_role_policy_attachment.node-AmazonEKS_CNI_Policy: Refreshing state... [id=fullcycle-fc_course-role-node-20240103195149330100000003]
+aws_iam_role_policy_attachment.node-AmazonEKSWorkerNodePolicy: Refreshing state... [id=fullcycle-fc_course-role-node-20240103195149143600000001]
+aws_iam_role_policy_attachment.cluster-AmazonEKSClusterPolicy: Refreshing state... [id=fullcycle-fc_course-role-20231228213737664400000001]
+aws_iam_role_policy_attachment.cluster-AmazonEKSVPCResourceController: Refreshing state... [id=fullcycle-fc_course-role-20231228213311474100000001]
+aws_internet_gateway.new-igw: Refreshing state... [id=igw-0b401a42be706ee70]
+aws_security_group.sg: Refreshing state... [id=sg-094df25f9931ad7f9]
+aws_subnet.subnets[1]: Refreshing state... [id=subnet-0790eb91c54315d67]
+aws_subnet.subnets[0]: Refreshing state... [id=subnet-01be84e8f03bc3b03]
+aws_route_table.new-rtb: Refreshing state... [id=rtb-07e07bf5de48b5157]
+aws_eks_cluster.cluster: Refreshing state... [id=fullcycle-fc_course]
+aws_route_table_association.new-rtb-association[0]: Refreshing state... [id=rtbassoc-07c72896aad74cb06]
+aws_route_table_association.new-rtb-association[1]: Refreshing state... [id=rtbassoc-0738acac44b984c59]
+
+Terraform used the selected providers to generate the following execution plan. Resource actions are indicated
+with the following symbols:
+  + create
+
+Terraform will perform the following actions:
+
+  # aws_eks_node_group.node-1 will be created
+  + resource "aws_eks_node_group" "node-1" {
+      + ami_type               = (known after apply)
+      + arn                    = (known after apply)
+      + capacity_type          = (known after apply)
+      + cluster_name           = "fullcycle-fc_course"
+      + disk_size              = (known after apply)
+      + id                     = (known after apply)
+      + instance_types         = (known after apply)
+      + node_group_name        = "node-1"
+      + node_group_name_prefix = (known after apply)
+      + node_role_arn          = "arn:aws:iam::000143974429:role/fullcycle-fc_course-role-node"
+      + release_version        = (known after apply)
+      + resources              = (known after apply)
+      + status                 = (known after apply)
+      + subnet_ids             = [
+          + "subnet-01be84e8f03bc3b03",
+          + "subnet-0790eb91c54315d67",
+        ]
+      + tags_all               = (known after apply)
+      + version                = (known after apply)
+
+      + scaling_config {
+          + desired_size = 2
+          + max_size     = 4
+          + min_size     = 2
+        }
+    }
+
+Plan: 1 to add, 0 to change, 0 to destroy.
+aws_eks_node_group.node-1: Creating...
+aws_eks_node_group.node-1: Still creating... [10s elapsed]
+aws_eks_node_group.node-1: Creation complete after 2m0s [id=fullcycle-fc_course:node-1]
+
+Apply complete! Resources: 1 added, 0 changed, 0 destroyed.
+```
+
+## Criando mais um Node Group
+Vamos olhar as maquinas criadas
+
+Console -> EKS -> Computing -> Node Groups
+
+node-1	2	1.28.3-20231230	- Ativo
+
+node-1 -> Nodes -> Criou duas maquinas com o padrao t3.medium. Esse eh o padrao. Normalmente no k8s nao rodamos com disco grande pq atachamos os volumes.
+
+
+E agora ja esta para escalar automaticamente.
+
+Os tipos de máquinas, conforme documetaçao no terraform, podemos escolher os tipos de maquinas e os grupos de disponiblidades. Para isso, podemos wscolher os instance types. Par a o freetier -> t3.micro ou t2.micro
+
+vamos duplicar e colocar o node-2
+```tf
+resource "aws_iam_role" "node" {
+  name = "${var.prefix}-${var.cluster_name}-role-node"
+  assume_role_policy = <<POLICY
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Principal": {
+        "Service": "ec2.amazonaws.com"
+      },
+      "Action": "sts:AssumeRole"
+    }
+  ]
+}
+POLICY
+}
+
+resource "aws_iam_role_policy_attachment" "node-AmazonEKSWorkerNodePolicy" {
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy"
+  role = aws_iam_role.node.name
+}
+
+resource "aws_iam_role_policy_attachment" "node-AmazonEKS_CNI_Policy" {
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy"
+  role = aws_iam_role.node.name
+}
+
+resource "aws_iam_role_policy_attachment" "node-AmazonEC2ContainerRegistryReadOnly" {
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly"
+  role = aws_iam_role.node.name
+}
+
+resource "aws_eks_node_group" "node-1" {
+  cluster_name = aws_eks_cluster.cluster.name
+  node_group_name = "node-1"
+  node_role_arn = aws_iam_role.node.arn
+  subnet_ids = aws_subnet.subnets[*].id
+  instance_types = ["t3.micro"]
+  scaling_config {
+    desired_size = var.desired_size
+    max_size = var.max_size
+    min_size = var.min_size
+  }
+  depends_on = [ 
+    aws_iam_role_policy_attachment.node-AmazonEKSWorkerNodePolicy,
+    aws_iam_role_policy_attachment.node-AmazonEKS_CNI_Policy,
+    aws_iam_role_policy_attachment.node-AmazonEC2ContainerRegistryReadOnly,
+  ]
+}
+
+resource "aws_eks_node_group" "node-2" {
+  cluster_name = aws_eks_cluster.cluster.name
+  node_group_name = "node-2"
+  node_role_arn = aws_iam_role.node.arn
+  subnet_ids = aws_subnet.subnets[*].id
+  instance_types = ["t3.micro"]
+  scaling_config {
+    desired_size = var.desired_size
+    max_size = var.max_size
+    min_size = var.min_size
+  }
+  depends_on = [ 
+    aws_iam_role_policy_attachment.node-AmazonEKSWorkerNodePolicy,
+    aws_iam_role_policy_attachment.node-AmazonEKS_CNI_Policy,
+    aws_iam_role_policy_attachment.node-AmazonEC2ContainerRegistryReadOnly,
+  ]
+}
+```
+
+E aplicar!
+```bash
+❯ terraform apply --auto-approve
+data.aws_availability_zones.available: Reading...
+aws_vpc.new-vpc: Refreshing state... [id=vpc-0270a43b02cf93e62]
+aws_iam_role.cluster: Refreshing state... [id=fullcycle-fc_course-role]
+aws_cloudwatch_log_group.log: Refreshing state... [id=/aws/eks/fullcycle-fc_course/cluster]
+aws_iam_role.node: Refreshing state... [id=fullcycle-fc_course-role-node]
+data.aws_availability_zones.available: Read complete after 0s [id=us-east-1]
+aws_iam_role_policy_attachment.node-AmazonEKSWorkerNodePolicy: Refreshing state... [id=fullcycle-fc_course-role-node-20240103195149143600000001]
+aws_iam_role_policy_attachment.node-AmazonEC2ContainerRegistryReadOnly: Refreshing state... [id=fullcycle-fc_course-role-node-20240103195149151600000002]
+aws_iam_role_policy_attachment.node-AmazonEKS_CNI_Policy: Refreshing state... [id=fullcycle-fc_course-role-node-20240103195149330100000003]
+aws_iam_role_policy_attachment.cluster-AmazonEKSVPCResourceController: Refreshing state... [id=fullcycle-fc_course-role-20231228213311474100000001]
+aws_iam_role_policy_attachment.cluster-AmazonEKSClusterPolicy: Refreshing state... [id=fullcycle-fc_course-role-20231228213737664400000001]
+aws_internet_gateway.new-igw: Refreshing state... [id=igw-0b401a42be706ee70]
+aws_subnet.subnets[0]: Refreshing state... [id=subnet-01be84e8f03bc3b03]
+aws_subnet.subnets[1]: Refreshing state... [id=subnet-0790eb91c54315d67]
+aws_security_group.sg: Refreshing state... [id=sg-094df25f9931ad7f9]
+aws_route_table.new-rtb: Refreshing state... [id=rtb-07e07bf5de48b5157]
+aws_eks_cluster.cluster: Refreshing state... [id=fullcycle-fc_course]
+aws_route_table_association.new-rtb-association[1]: Refreshing state... [id=rtbassoc-0738acac44b984c59]
+aws_route_table_association.new-rtb-association[0]: Refreshing state... [id=rtbassoc-07c72896aad74cb06]
+aws_eks_node_group.node-1: Refreshing state... [id=fullcycle-fc_course:node-1]
+
+Terraform used the selected providers to generate the following execution plan. Resource actions are indicated
+with the following symbols:
+  + create
+-/+ destroy and then create replacement
+
+Terraform will perform the following actions:
+
+  # aws_eks_node_group.node-1 must be replaced
+-/+ resource "aws_eks_node_group" "node-1" {
+      ~ ami_type               = "AL2_x86_64" -> (known after apply)
+      ~ arn                    = "arn:aws:eks:us-east-1:000143974429:nodegroup/fullcycle-fc_course/node-1/12c66879-a312-5477-da30-9376333c9ffa" -> (known after apply)
+      ~ capacity_type          = "ON_DEMAND" -> (known after apply)
+      ~ disk_size              = 20 -> (known after apply)
+      ~ id                     = "fullcycle-fc_course:node-1" -> (known after apply)
+      ~ instance_types         = [ # forces replacement
+          - "t3.medium",
+          + "t3.micro",
+        ]
+      - labels                 = {} -> null
+      + node_group_name_prefix = (known after apply)
+      ~ release_version        = "1.28.3-20231230" -> (known after apply)
+      ~ resources              = [
+          - {
+              - autoscaling_groups              = [
+                  - {
+                      - name = "eks-node-1-12c66879-a312-5477-da30-9376333c9ffa"
+                    },
+                ]
+              - remote_access_security_group_id = ""
+            },
+        ] -> (known after apply)
+      ~ status                 = "ACTIVE" -> (known after apply)
+      - tags                   = {} -> null
+      ~ tags_all               = {} -> (known after apply)
+      ~ version                = "1.28" -> (known after apply)
+        # (4 unchanged attributes hidden)
+
+      - update_config {
+          - max_unavailable            = 1 -> null
+          - max_unavailable_percentage = 0 -> null
+        }
+
+        # (1 unchanged block hidden)
+    }
+
+  # aws_eks_node_group.node-2 will be created
+  + resource "aws_eks_node_group" "node-2" {
+      + ami_type               = (known after apply)
+      + arn                    = (known after apply)
+      + capacity_type          = (known after apply)
+      + cluster_name           = "fullcycle-fc_course"
+      + disk_size              = (known after apply)
+      + id                     = (known after apply)
+      + instance_types         = [
+          + "t3.micro",
+        ]
+      + node_group_name        = "node-2"
+      + node_group_name_prefix = (known after apply)
+      + node_role_arn          = "arn:aws:iam::000143974429:role/fullcycle-fc_course-role-node"
+      + release_version        = (known after apply)
+      + resources              = (known after apply)
+      + status                 = (known after apply)
+      + subnet_ids             = [
+          + "subnet-01be84e8f03bc3b03",
+          + "subnet-0790eb91c54315d67",
+        ]
+      + tags_all               = (known after apply)
+      + version                = (known after apply)
+
+      + scaling_config {
+          + desired_size = 2
+          + max_size     = 4
+          + min_size     = 2
+        }
+    }
+
+Plan: 2 to add, 0 to change, 1 to destroy.
+aws_eks_node_group.node-1: Destroying... [id=fullcycle-fc_course:node-1]
+aws_eks_node_group.node-2: Creating...
+aws_eks_node_group.node-1: Creation complete after 1m49s [id=fullcycle-fc_course:node-1]
+
+Apply complete! Resources: 2 added, 0 changed, 1 destroyed.
+```
+
+Pronto! mudamos de t3.medium para micro no node-1 e criamos o node-2
+
+Entao ele criou node-1 como novo tipo de maquina para destruir o antigo e tb criou o node-2.
+
+Lembrando que podemos escolher apenas as AZs conforme configuramos as subnets
+
+
+Agora, estamos com 4 máquinas na AWS dentro do nosso cluster, dividos em dois NodeGroups!
+
+## Criando kubeconfig
+Agora temos que consegui acessar o k8s e precisamos do arquivo kubeconfig que eh onde o kubectl vai buscar o kubectrl para conseguirmos acessar o cluster!
+
+Quando configuramos os providers, vimos o local provider mas ainda nao o utilizamos porque tudo o que fixemos ateh agora veio da aws.
+
+Agora, vamos criar um arquivo `outputs.tf` utilizando o provider local para gerar o arquivo do kubeconfig.
+
+```tf
+locals {
+  kubeconfig = <<KUBECONFIG
+apiVersion: v1
+clusters:
+- cluster:
+    server: ${aws_eks_cluster.cluster.endpoint}
+    certificate-authority-data: ${aws_eks_cluster.cluster.certificate_authority[0].data}
+  name: kubernetes
+contexts:
+- context:
+    cluster: kubernetes
+    user: "${aws_eks_cluster.cluster.name}"
+  name: "${aws_eks_cluster.cluster.name}"
+current-context: "${aws_eks_cluster.cluster.name}"
+kind: Config
+preferences: {}
+users:
+- name: "${aws_eks_cluster.cluster.name}"
+  user:
+    exec:
+      apiVersion: client.authentication.k8s.io/v1alpha1
+      command: aws-iam-authenticator
+      args:
+        - "token"
+        - "-i"
+        - "${aws_eks_cluster.cluster.name}"
+KUBECONFIG
+}
+
+resource "local_file" "kubeconfig" {
+  filename = "kubeconfig"
+  content = local.kubeconfig
+}
+```
+
+Algo EXTREMAMENTE IMPORRTANTE: `command: aws-iam-authenticator`
+
+vamos criar um resource de local_file com o nome kubeconfig. Isso vai gravar em nosso diretorio o conteudo do kubeconfig!
+
+vAMOS APLICAR:
+```bash
+❯ terraform apply --auto-approve
+data.aws_availability_zones.available: Reading...
+aws_cloudwatch_log_group.log: Refreshing state... [id=/aws/eks/fullcycle-fc_course/cluster]
+aws_iam_role.node: Refreshing state... [id=fullcycle-fc_course-role-node]
+aws_iam_role.cluster: Refreshing state... [id=fullcycle-fc_course-role]
+aws_vpc.new-vpc: Refreshing state... [id=vpc-0270a43b02cf93e62]
+data.aws_availability_zones.available: Read complete after 0s [id=us-east-1]
+aws_iam_role_policy_attachment.cluster-AmazonEKSClusterPolicy: Refreshing state... [id=fullcycle-fc_course-role-20231228213737664400000001]
+aws_iam_role_policy_attachment.cluster-AmazonEKSVPCResourceController: Refreshing state... [id=fullcycle-fc_course-role-20231228213311474100000001]
+aws_iam_role_policy_attachment.node-AmazonEKS_CNI_Policy: Refreshing state... [id=fullcycle-fc_course-role-node-20240103195149330100000003]
+aws_iam_role_policy_attachment.node-AmazonEKSWorkerNodePolicy: Refreshing state... [id=fullcycle-fc_course-role-node-20240103195149143600000001]
+aws_iam_role_policy_attachment.node-AmazonEC2ContainerRegistryReadOnly: Refreshing state... [id=fullcycle-fc_course-role-node-20240103195149151600000002]
+aws_internet_gateway.new-igw: Refreshing state... [id=igw-0b401a42be706ee70]
+aws_subnet.subnets[1]: Refreshing state... [id=subnet-0790eb91c54315d67]
+aws_subnet.subnets[0]: Refreshing state... [id=subnet-01be84e8f03bc3b03]
+aws_security_group.sg: Refreshing state... [id=sg-094df25f9931ad7f9]
+aws_route_table.new-rtb: Refreshing state... [id=rtb-07e07bf5de48b5157]
+aws_eks_cluster.cluster: Refreshing state... [id=fullcycle-fc_course]
+aws_route_table_association.new-rtb-association[1]: Refreshing state... [id=rtbassoc-0738acac44b984c59]
+aws_route_table_association.new-rtb-association[0]: Refreshing state... [id=rtbassoc-07c72896aad74cb06]
+aws_eks_node_group.node-1: Refreshing state... [id=fullcycle-fc_course:node-1]
+aws_eks_node_group.node-2: Refreshing state... [id=fullcycle-fc_course:node-2]
+
+Terraform used the selected providers to generate the following execution plan. Resource actions are indicated
+with the following symbols:
+  + create
+
+Terraform will perform the following actions:
+
+  # local_file.kubeconfig will be created
+  + resource "local_file" "kubeconfig" {
+      + content              = <<-EOT
+            apiVersion: v1
+            clusters:
+            - cluster:
+                server: https://F6F52A2747F96DB7047D381423AD4CE6.gr7.us-east-1.eks.amazonaws.com
+                certificate-authority-data: LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSURCVENDQWUyZ0F3SUJBZ0lJWmVadXQ0a3VQa2t3RFFZSktvWklodmNOQVFFTEJRQXdGVEVUTUJFR0ExVUUKQXhNS2EzVmlaWEp1WlhSbGN6QWVGdzB5TkRBeE1ESXlNVEE0TlRSYUZ3MHpNekV5TXpBeU1URXpOVFJhTUJVeApFekFSQmdOVkJBTVRDbXQxWW1WeWJtVjBaWE13Z2dFaU1BMEdDU3FHU0liM0RRRUJBUVVBQTRJQkR3QXdnZ0VLCkFvSUJBUURuQzNWMWdrZTcrZ2JHa2lUNUdtbzdTQ3pkeVZZU25KcTJXSFRNNGEwUis2YVg3LzhtbmpUQ0dLUEIKcXFGcUJ5VmZIbnV5SU01WE9kL3lteWFPNXExdldjcVhZUTRCQm1lLy96YkxsYms5Y3FqdkxrMWZ0MlNBWVdBUQpwQzdJT1M5Q3YyQmtyRndncU1xeVpHMmNYSDlEWGx0Q0dyWWUrN2R3WmN5MGFpb1NYTytMempDYUhsTHBFRm1vCjRVRDltZTlBR2dzZld5a1dlV1loWGw5LzVLQ0JTNldPdmZiYTFwd2Q3UzljNzIyeUVQazBrcks1Wk94TTJkMFYKSktraVFJdG5ROVBMbVBENHNTSlJITnZLL2c0VjUrTThsTkxDYkpCQnFVL203MUxNYlBIbVhUQ1NMU0pjdUNUcgpYQ3Uyb2Z0UmJXY2tIYWpWY3pSWkVLbkFyRFFQQWdNQkFBR2pXVEJYTUE0R0ExVWREd0VCL3dRRUF3SUNwREFQCkJnTlZIUk1CQWY4RUJUQURBUUgvTUIwR0ExVWREZ1FXQkJSL0lHWTE5U2c2TnlxajBNUWtoOHRPWW4ycUJ6QVYKQmdOVkhSRUVEakFNZ2dwcmRXSmxjbTVsZEdWek1BMEdDU3FHU0liM0RRRUJDd1VBQTRJQkFRQXUrVGFBWjNQUApkNFF4bW11SVZ2OXMxMTNELzBhd3JGR1NrakkxaTVZc2k4S25QT2Nob2xWdjEra2lKbG5zNE5PSzlDWmhzcE5XClV2QWh3aklLSFViN3hMR1VuNGZmSlROUmhpY2prUytxUTZBdDRDMzBLaC93R3BRUHFDQlZmRytPSkI2RDNHQXAKUG5HckFyeEgvTk5GYUxzOEc4cnNNMy9zRjRQbEZIcFV5U3BnQUMwa2RNV3RQRHZOcExzaEJ1cnVzcDRlNnlnawpFc3F5MGRlZXpTTURyN0ZjYU9IemoyQnZJRjZzazZ6eVlyRndINURGTGRKVGlHWHFaa1BuWGV2VUVWcGdCZWFrCjY0cDQrcVRaRjRuTVlTdEZzM2pOQ3ZLSWpYaUJWRUIwdUVVeXB4M3UzNUU0T2NVUFJjVUphZzN0RnQ0STNZM2gKSjVtendwdFFBTUJaCi0tLS0tRU5EIENFUlRJRklDQVRFLS0tLS0K
+              name: kubernetes
+            contexts:
+            - context:
+                cluster: kubernetes
+                user: "fullcycle-fc_course"
+              name: "fullcycle-fc_course"
+            current-context: "fullcycle-fc_course"
+            kind: Config
+            preferences: {}
+            users:
+            - name: "fullcycle-fc_course"
+              user:
+                exec:
+                  apiVersion: client.authentication.k8s.io/v1alpha1
+                  command: aws-iam-authenticator
+                  args:
+                    - "token"
+                    - "-i"
+                    - "fullcycle-fc_course"
+        EOT
+      + content_base64sha256 = (known after apply)
+      + content_base64sha512 = (known after apply)
+      + content_md5          = (known after apply)
+      + content_sha1         = (known after apply)
+      + content_sha256       = (known after apply)
+      + content_sha512       = (known after apply)
+      + directory_permission = "0777"
+      + file_permission      = "0777"
+      + filename             = "kubeconfig"
+      + id                   = (known after apply)
+    }
+
+Plan: 1 to add, 0 to change, 0 to destroy.
+local_file.kubeconfig: Creating...
+local_file.kubeconfig: Creation complete after 0s [id=5eec93cc066fb1246dd9cd3cd160393f60526218]
+
+Apply complete! Resources: 1 added, 0 changed, 0 destroyed.
+```
+
+Olha que interessante! O arquivo kubeconfig foi criado em nosso diretório local!
+
+E o kubeconfig tem o nuymero do endpoint, do certificado da aws etc.
+
+Porem, se formos tentar rodar o kubeconfig, a aws tem uma camada a mais de segurança. E ela usa o aws-iam-autenticator. Quando instalamos esse programa no computador toda vez que rodamos o kubectl ela ve se o usuário que estamos logado eh que tem permissao para acessar o cluster. 
+
+Vamos baixar e instalar:
+https://docs.aws.amazon.com/pt_br/eks/latest/userguide/install-aws-iam-authenticator.html
+
+E verificar se esta tudo ok
+```bash
+rogeriocassares in Docs/DevOps/Terraform/terraform-aws-eks on  feature/devOps-terraform-eks [!?] took 9.9s 
+❯ aws-iam-authenticator help
+A tool to authenticate to Kubernetes using AWS IAM credentials
+
+Usage:
+  aws-iam-authenticator [command]
+
+Available Commands:
+  add         add IAM entity to an existing aws-auth configmap
+  completion  Generate the autocompletion script for the specified shell
+  help        Help about any command
+  init        Pre-generate certificate, private key, and kubeconfig files for the server.
+  server      Run a webhook validation server suitable that validates tokens using AWS IAM
+  token       Authenticate using AWS IAM and get token for Kubernetes
+  verify      Verify a token for debugging purpose
+  version     Version will output the current build information
+
+Flags:
+  -i, --cluster-id ID                 Specify the cluster ID, a unique-per-cluster identifier for your aws-iam-authenticator installation.
+  -c, --config filename               Load configuration from filename
+      --feature-gates mapStringBool   A set of key=value pairs that describe feature gates for alpha/experimental features. Options are:
+                                      AllAlpha=true|false (ALPHA - default=false)
+                                      AllBeta=true|false (BETA - default=false)
+                                      ConfiguredInitDirectories=true|false (ALPHA - default=false)
+                                      IAMIdentityMappingCRD=true|false (ALPHA - default=false)
+  -h, --help                          help for aws-iam-authenticator
+  -l, --log-format string             Specify log format to use when logging to stderr [text or json] (default "text")
+
+Use "aws-iam-authenticator [command] --help" for more information about a command.
+```
+
+pRONTO!
+
+Agora vamos copiar o kubeconfig para o nosso config ataul do pc. Requisito ter o kubectl
+
+mv ~/.kube/config ~/.kube/config.bak
+cp kubeconfig ~/.kube/config
+
+Vamos dar o kubectl get nodes!
+
+```bash
+kubectl get nodes
+error: exec plugin: invalid apiVersion "client.authentication.k8s.io/v1alpha1"
+```
+
+Entao instalamos a versao mais recente do kubectl em
+https://docs.aws.amazon.com/eks/latest/userguide/install-kubectl.html
+
+E atachamos o comando a seguir no kubeconfig:
+```bash
+aws eks update-kubeconfig --region us-east-1 --name fullcycle-fc_course
+```
+```bash
+Added new context arn:aws:eks:us-east-1:000143974429:cluster/fullcycle-fc_course to /Users/rogeriocassares/.kube/config
+```
+
+O novo arquivo kubeconfig ficou 
+~/.kube/config
+```config
+apiVersion: v1
+clusters:
+- cluster:
+    server: https://F6F52A2747F96DB7047D381423AD4CE6.gr7.us-east-1.eks.amazonaws.com
+    certificate-authority-data: LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSURCVENDQWUyZ0F3SUJBZ0lJWmVadXQ0a3VQa2t3RFFZSktvWklodmNOQVFFTEJRQXdGVEVUTUJFR0ExVUUKQXhNS2EzVmlaWEp1WlhSbGN6QWVGdzB5TkRBeE1ESXlNVEE0TlRSYUZ3MHpNekV5TXpBeU1URXpOVFJhTUJVeApFekFSQmdOVkJBTVRDbXQxWW1WeWJtVjBaWE13Z2dFaU1BMEdDU3FHU0liM0RRRUJBUVVBQTRJQkR3QXdnZ0VLCkFvSUJBUURuQzNWMWdrZTcrZ2JHa2lUNUdtbzdTQ3pkeVZZU25KcTJXSFRNNGEwUis2YVg3LzhtbmpUQ0dLUEIKcXFGcUJ5VmZIbnV5SU01WE9kL3lteWFPNXExdldjcVhZUTRCQm1lLy96YkxsYms5Y3FqdkxrMWZ0MlNBWVdBUQpwQzdJT1M5Q3YyQmtyRndncU1xeVpHMmNYSDlEWGx0Q0dyWWUrN2R3WmN5MGFpb1NYTytMempDYUhsTHBFRm1vCjRVRDltZTlBR2dzZld5a1dlV1loWGw5LzVLQ0JTNldPdmZiYTFwd2Q3UzljNzIyeUVQazBrcks1Wk94TTJkMFYKSktraVFJdG5ROVBMbVBENHNTSlJITnZLL2c0VjUrTThsTkxDYkpCQnFVL203MUxNYlBIbVhUQ1NMU0pjdUNUcgpYQ3Uyb2Z0UmJXY2tIYWpWY3pSWkVLbkFyRFFQQWdNQkFBR2pXVEJYTUE0R0ExVWREd0VCL3dRRUF3SUNwREFQCkJnTlZIUk1CQWY4RUJUQURBUUgvTUIwR0ExVWREZ1FXQkJSL0lHWTE5U2c2TnlxajBNUWtoOHRPWW4ycUJ6QVYKQmdOVkhSRUVEakFNZ2dwcmRXSmxjbTVsZEdWek1BMEdDU3FHU0liM0RRRUJDd1VBQTRJQkFRQXUrVGFBWjNQUApkNFF4bW11SVZ2OXMxMTNELzBhd3JGR1NrakkxaTVZc2k4S25QT2Nob2xWdjEra2lKbG5zNE5PSzlDWmhzcE5XClV2QWh3aklLSFViN3hMR1VuNGZmSlROUmhpY2prUytxUTZBdDRDMzBLaC93R3BRUHFDQlZmRytPSkI2RDNHQXAKUG5HckFyeEgvTk5GYUxzOEc4cnNNMy9zRjRQbEZIcFV5U3BnQUMwa2RNV3RQRHZOcExzaEJ1cnVzcDRlNnlnawpFc3F5MGRlZXpTTURyN0ZjYU9IemoyQnZJRjZzazZ6eVlyRndINURGTGRKVGlHWHFaa1BuWGV2VUVWcGdCZWFrCjY0cDQrcVRaRjRuTVlTdEZzM2pOQ3ZLSWpYaUJWRUIwdUVVeXB4M3UzNUU0T2NVUFJjVUphZzN0RnQ0STNZM2gKSjVtendwdFFBTUJaCi0tLS0tRU5EIENFUlRJRklDQVRFLS0tLS0K
+  name: kubernetes
+- cluster:
+    certificate-authority-data: LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSURCVENDQWUyZ0F3SUJBZ0lJWmVadXQ0a3VQa2t3RFFZSktvWklodmNOQVFFTEJRQXdGVEVUTUJFR0ExVUUKQXhNS2EzVmlaWEp1WlhSbGN6QWVGdzB5TkRBeE1ESXlNVEE0TlRSYUZ3MHpNekV5TXpBeU1URXpOVFJhTUJVeApFekFSQmdOVkJBTVRDbXQxWW1WeWJtVjBaWE13Z2dFaU1BMEdDU3FHU0liM0RRRUJBUVVBQTRJQkR3QXdnZ0VLCkFvSUJBUURuQzNWMWdrZTcrZ2JHa2lUNUdtbzdTQ3pkeVZZU25KcTJXSFRNNGEwUis2YVg3LzhtbmpUQ0dLUEIKcXFGcUJ5VmZIbnV5SU01WE9kL3lteWFPNXExdldjcVhZUTRCQm1lLy96YkxsYms5Y3FqdkxrMWZ0MlNBWVdBUQpwQzdJT1M5Q3YyQmtyRndncU1xeVpHMmNYSDlEWGx0Q0dyWWUrN2R3WmN5MGFpb1NYTytMempDYUhsTHBFRm1vCjRVRDltZTlBR2dzZld5a1dlV1loWGw5LzVLQ0JTNldPdmZiYTFwd2Q3UzljNzIyeUVQazBrcks1Wk94TTJkMFYKSktraVFJdG5ROVBMbVBENHNTSlJITnZLL2c0VjUrTThsTkxDYkpCQnFVL203MUxNYlBIbVhUQ1NMU0pjdUNUcgpYQ3Uyb2Z0UmJXY2tIYWpWY3pSWkVLbkFyRFFQQWdNQkFBR2pXVEJYTUE0R0ExVWREd0VCL3dRRUF3SUNwREFQCkJnTlZIUk1CQWY4RUJUQURBUUgvTUIwR0ExVWREZ1FXQkJSL0lHWTE5U2c2TnlxajBNUWtoOHRPWW4ycUJ6QVYKQmdOVkhSRUVEakFNZ2dwcmRXSmxjbTVsZEdWek1BMEdDU3FHU0liM0RRRUJDd1VBQTRJQkFRQXUrVGFBWjNQUApkNFF4bW11SVZ2OXMxMTNELzBhd3JGR1NrakkxaTVZc2k4S25QT2Nob2xWdjEra2lKbG5zNE5PSzlDWmhzcE5XClV2QWh3aklLSFViN3hMR1VuNGZmSlROUmhpY2prUytxUTZBdDRDMzBLaC93R3BRUHFDQlZmRytPSkI2RDNHQXAKUG5HckFyeEgvTk5GYUxzOEc4cnNNMy9zRjRQbEZIcFV5U3BnQUMwa2RNV3RQRHZOcExzaEJ1cnVzcDRlNnlnawpFc3F5MGRlZXpTTURyN0ZjYU9IemoyQnZJRjZzazZ6eVlyRndINURGTGRKVGlHWHFaa1BuWGV2VUVWcGdCZWFrCjY0cDQrcVRaRjRuTVlTdEZzM2pOQ3ZLSWpYaUJWRUIwdUVVeXB4M3UzNUU0T2NVUFJjVUphZzN0RnQ0STNZM2gKSjVtendwdFFBTUJaCi0tLS0tRU5EIENFUlRJRklDQVRFLS0tLS0K
+    server: https://F6F52A2747F96DB7047D381423AD4CE6.gr7.us-east-1.eks.amazonaws.com
+  name: arn:aws:eks:us-east-1:000143974429:cluster/fullcycle-fc_course
+contexts:
+- context:
+    cluster: kubernetes
+    user: fullcycle-fc_course
+  name: fullcycle-fc_course
+- context:
+    cluster: arn:aws:eks:us-east-1:000143974429:cluster/fullcycle-fc_course
+    user: arn:aws:eks:us-east-1:000143974429:cluster/fullcycle-fc_course
+  name: arn:aws:eks:us-east-1:000143974429:cluster/fullcycle-fc_course
+current-context: arn:aws:eks:us-east-1:000143974429:cluster/fullcycle-fc_course
+kind: Config
+preferences: {}
+users:
+- name: fullcycle-fc_course
+  user:
+    exec:
+      apiVersion: client.authentication.k8s.io/v1alpha1
+      command: aws-iam-authenticator
+      args:
+      - token
+      - -i
+      - fullcycle-fc_course
+- name: arn:aws:eks:us-east-1:000143974429:cluster/fullcycle-fc_course
+  user:
+    exec:
+      apiVersion: client.authentication.k8s.io/v1beta1
+      args:
+      - --region
+      - us-east-1
+      - eks
+      - get-token
+      - --cluster-name
+      - fullcycle-fc_course
+      - --output
+      - json
+      command: aws
+```
+
+Com isso agora é possivel executar o comando do kubectl get nodes!
+```bash
+kubectl get nodes
+NAME                         STATUS   ROLES    AGE   VERSION
+ip-10-0-0-130.ec2.internal   Ready    <none>   17h   v1.28.3-eks-e71965b
+ip-10-0-0-144.ec2.internal   Ready    <none>   17h   v1.28.3-eks-e71965b
+ip-10-0-1-207.ec2.internal   Ready    <none>   17h   v1.28.3-eks-e71965b
+ip-10-0-1-243.ec2.internal   Ready    <none>   17h   v1.28.3-eks-e71965b
+```
+
+```bash
+kubectl get svc
+NAME         TYPE        CLUSTER-IP   EXTERNAL-IP   PORT(S)   AGE
+kubernetes   ClusterIP   172.20.0.1   <none>        443/TCP   41h
+```
+
+```bash
+kubectl get all
+NAME                 TYPE        CLUSTER-IP   EXTERNAL-IP   PORT(S)   AGE
+service/kubernetes   ClusterIP   172.20.0.1   <none>        443/TCP   41h
+```
+
+E aqui a gente consegue trabalhar com quailquer coisa de k8s!
+
+## Criando deployment e destruindo cluster
+
+Agora vamos criar um simples deployment e depois destruir todos os cluster e recursos.
+
+Vamos criar um deployment
+
+```bash
+❯ kubectl create deploy nginx --image=nginx
+deployment.apps/nginx created
+```
+
+E verificar os pods
+```bash
+❯ kubectl get po
+NAME                     READY   STATUS    RESTARTS   AGE
+nginx-7854ff8877-lplgd   1/1     Running   0          46s
+```
+
+E reencaminhar a porta do nginx
+```bash
+❯ kubectl port-forward pod/nginx-7854ff8877-lplgd 8181:80
+Forwarding from 127.0.0.1:8181 -> 80
+Forwarding from [::1]:8181 -> 80
+```
+
+Entao, se acessarmos a porta 80 do nosso localhost, significa que estamos acessando a porta 80 do Pod no k8s da aws!
+
+http://localhost:8181
+
+UAUUU
+
+Vamos dar adeus ao cluster
+
+```bash
+❯ terraform destroy
+data.aws_availability_zones.available: Reading...
+aws_cloudwatch_log_group.log: Refreshing state... [id=/aws/eks/fullcycle-fc_course/cluster]
+aws_vpc.new-vpc: Refreshing state... [id=vpc-0270a43b02cf93e62]
+aws_iam_role.node: Refreshing state... [id=fullcycle-fc_course-role-node]
+aws_iam_role.cluster: Refreshing state... [id=fullcycle-fc_course-role]
+data.aws_availability_zones.available: Read complete after 1s [id=us-east-1]
+aws_iam_role_policy_attachment.cluster-AmazonEKSClusterPolicy: Refreshing state... [id=fullcycle-fc_course-role-20231228213737664400000001]
+aws_iam_role_policy_attachment.cluster-AmazonEKSVPCResourceController: Refreshing state... [id=fullcycle-fc_course-role-20231228213311474100000001]
+aws_iam_role_policy_attachment.node-AmazonEKSWorkerNodePolicy: Refreshing state... [id=fullcycle-fc_course-role-node-20240103195149143600000001]
+aws_iam_role_policy_attachment.node-AmazonEC2ContainerRegistryReadOnly: Refreshing state... [id=fullcycle-fc_course-role-node-20240103195149151600000002]
+aws_iam_role_policy_attachment.node-AmazonEKS_CNI_Policy: Refreshing state... [id=fullcycle-fc_course-role-node-20240103195149330100000003]
+aws_internet_gateway.new-igw: Refreshing state... [id=igw-0b401a42be706ee70]
+aws_subnet.subnets[0]: Refreshing state... [id=subnet-01be84e8f03bc3b03]
+aws_security_group.sg: Refreshing state... [id=sg-094df25f9931ad7f9]
+aws_subnet.subnets[1]: Refreshing state... [id=subnet-0790eb91c54315d67]
+aws_route_table.new-rtb: Refreshing state... [id=rtb-07e07bf5de48b5157]
+aws_route_table_association.new-rtb-association[0]: Refreshing state... [id=rtbassoc-07c72896aad74cb06]
+aws_route_table_association.new-rtb-association[1]: Refreshing state... [id=rtbassoc-0738acac44b984c59]
+aws_eks_cluster.cluster: Refreshing state... [id=fullcycle-fc_course]
+aws_eks_node_group.node-1: Refreshing state... [id=fullcycle-fc_course:node-1]
+aws_eks_node_group.node-2: Refreshing state... [id=fullcycle-fc_course:node-2]
+local_file.kubeconfig: Refreshing state... [id=5eec93cc066fb1246dd9cd3cd160393f60526218]
+
+Terraform used the selected providers to generate the following execution plan. Resource actions are indicated
+with the following symbols:
+  - destroy
+
+Terraform will perform the following actions:
+
+  # aws_cloudwatch_log_group.log will be destroyed
+  - resource "aws_cloudwatch_log_group" "log" {
+      - arn               = "arn:aws:logs:us-east-1:000143974429:log-group:/aws/eks/fullcycle-fc_course/cluster" -> null
+      - id                = "/aws/eks/fullcycle-fc_course/cluster" -> null
+      - log_group_class   = "STANDARD" -> null
+      - name              = "/aws/eks/fullcycle-fc_course/cluster" -> null
+      - retention_in_days = 30 -> null
+      - skip_destroy      = false -> null
+      - tags              = {} -> null
+      - tags_all          = {} -> null
+    }
+
+  # aws_eks_cluster.cluster will be destroyed
+  - resource "aws_eks_cluster" "cluster" {
+      - arn                       = "arn:aws:eks:us-east-1:000143974429:cluster/fullcycle-fc_course" -> null
+      - certificate_authority     = [
+          - {
+              - data = "LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSURCVENDQWUyZ0F3SUJBZ0lJWmVadXQ0a3VQa2t3RFFZSktvWklodmNOQVFFTEJRQXdGVEVUTUJFR0ExVUUKQXhNS2EzVmlaWEp1WlhSbGN6QWVGdzB5TkRBeE1ESXlNVEE0TlRSYUZ3MHpNekV5TXpBeU1URXpOVFJhTUJVeApFekFSQmdOVkJBTVRDbXQxWW1WeWJtVjBaWE13Z2dFaU1BMEdDU3FHU0liM0RRRUJBUVVBQTRJQkR3QXdnZ0VLCkFvSUJBUURuQzNWMWdrZTcrZ2JHa2lUNUdtbzdTQ3pkeVZZU25KcTJXSFRNNGEwUis2YVg3LzhtbmpUQ0dLUEIKcXFGcUJ5VmZIbnV5SU01WE9kL3lteWFPNXExdldjcVhZUTRCQm1lLy96YkxsYms5Y3FqdkxrMWZ0MlNBWVdBUQpwQzdJT1M5Q3YyQmtyRndncU1xeVpHMmNYSDlEWGx0Q0dyWWUrN2R3WmN5MGFpb1NYTytMempDYUhsTHBFRm1vCjRVRDltZTlBR2dzZld5a1dlV1loWGw5LzVLQ0JTNldPdmZiYTFwd2Q3UzljNzIyeUVQazBrcks1Wk94TTJkMFYKSktraVFJdG5ROVBMbVBENHNTSlJITnZLL2c0VjUrTThsTkxDYkpCQnFVL203MUxNYlBIbVhUQ1NMU0pjdUNUcgpYQ3Uyb2Z0UmJXY2tIYWpWY3pSWkVLbkFyRFFQQWdNQkFBR2pXVEJYTUE0R0ExVWREd0VCL3dRRUF3SUNwREFQCkJnTlZIUk1CQWY4RUJUQURBUUgvTUIwR0ExVWREZ1FXQkJSL0lHWTE5U2c2TnlxajBNUWtoOHRPWW4ycUJ6QVYKQmdOVkhSRUVEakFNZ2dwcmRXSmxjbTVsZEdWek1BMEdDU3FHU0liM0RRRUJDd1VBQTRJQkFRQXUrVGFBWjNQUApkNFF4bW11SVZ2OXMxMTNELzBhd3JGR1NrakkxaTVZc2k4S25QT2Nob2xWdjEra2lKbG5zNE5PSzlDWmhzcE5XClV2QWh3aklLSFViN3hMR1VuNGZmSlROUmhpY2prUytxUTZBdDRDMzBLaC93R3BRUHFDQlZmRytPSkI2RDNHQXAKUG5HckFyeEgvTk5GYUxzOEc4cnNNMy9zRjRQbEZIcFV5U3BnQUMwa2RNV3RQRHZOcExzaEJ1cnVzcDRlNnlnawpFc3F5MGRlZXpTTURyN0ZjYU9IemoyQnZJRjZzazZ6eVlyRndINURGTGRKVGlHWHFaa1BuWGV2VUVWcGdCZWFrCjY0cDQrcVRaRjRuTVlTdEZzM2pOQ3ZLSWpYaUJWRUIwdUVVeXB4M3UzNUU0T2NVUFJjVUphZzN0RnQ0STNZM2gKSjVtendwdFFBTUJaCi0tLS0tRU5EIENFUlRJRklDQVRFLS0tLS0K"
+            },
+        ] -> null
+      - created_at                = "2024-01-02 21:08:05.366 +0000 UTC" -> null
+      - enabled_cluster_log_types = [
+          - "api",
+          - "audit",
+        ] -> null
+      - endpoint                  = "https://F6F52A2747F96DB7047D381423AD4CE6.gr7.us-east-1.eks.amazonaws.com" -> null
+      - id                        = "fullcycle-fc_course" -> null
+      - identity                  = [
+          - {
+              - oidc = [
+                  - {
+                      - issuer = "https://oidc.eks.us-east-1.amazonaws.com/id/F6F52A2747F96DB7047D381423AD4CE6"
+                    },
+                ]
+            },
+        ] -> null
+      - name                      = "fullcycle-fc_course" -> null
+      - platform_version          = "eks.6" -> null
+      - role_arn                  = "arn:aws:iam::000143974429:role/fullcycle-fc_course-role" -> null
+      - status                    = "ACTIVE" -> null
+      - tags                      = {} -> null
+      - tags_all                  = {} -> null
+      - version                   = "1.28" -> null
+
+      - kubernetes_network_config {
+          - ip_family         = "ipv4" -> null
+          - service_ipv4_cidr = "172.20.0.0/16" -> null
+        }
+
+      - vpc_config {
+          - cluster_security_group_id = "sg-0b29d8901dc920a3b" -> null
+          - endpoint_private_access   = false -> null
+          - endpoint_public_access    = true -> null
+          - public_access_cidrs       = [
+              - "0.0.0.0/0",
+            ] -> null
+          - security_group_ids        = [
+              - "sg-094df25f9931ad7f9",
+            ] -> null
+          - subnet_ids                = [
+              - "subnet-01be84e8f03bc3b03",
+              - "subnet-0790eb91c54315d67",
+            ] -> null
+          - vpc_id                    = "vpc-0270a43b02cf93e62" -> null
+        }
+    }
+
+  # aws_eks_node_group.node-1 will be destroyed
+  - resource "aws_eks_node_group" "node-1" {
+      - ami_type        = "AL2_x86_64" -> null
+      - arn             = "arn:aws:eks:us-east-1:000143974429:nodegroup/fullcycle-fc_course/node-1/12c66881-9a31-526d-5c21-98e4083273bf" -> null
+      - capacity_type   = "ON_DEMAND" -> null
+      - cluster_name    = "fullcycle-fc_course" -> null
+      - disk_size       = 20 -> null
+      - id              = "fullcycle-fc_course:node-1" -> null
+      - instance_types  = [
+          - "t3.micro",
+        ] -> null
+      - labels          = {} -> null
+      - node_group_name = "node-1" -> null
+      - node_role_arn   = "arn:aws:iam::000143974429:role/fullcycle-fc_course-role-node" -> null
+      - release_version = "1.28.3-20231230" -> null
+      - resources       = [
+          - {
+              - autoscaling_groups              = [
+                  - {
+                      - name = "eks-node-1-12c66881-9a31-526d-5c21-98e4083273bf"
+                    },
+                ]
+              - remote_access_security_group_id = ""
+            },
+        ] -> null
+      - status          = "ACTIVE" -> null
+      - subnet_ids      = [
+          - "subnet-01be84e8f03bc3b03",
+          - "subnet-0790eb91c54315d67",
+        ] -> null
+      - tags            = {} -> null
+      - tags_all        = {} -> null
+      - version         = "1.28" -> null
+
+      - scaling_config {
+          - desired_size = 2 -> null
+          - max_size     = 4 -> null
+          - min_size     = 2 -> null
+        }
+
+      - update_config {
+          - max_unavailable            = 1 -> null
+          - max_unavailable_percentage = 0 -> null
+        }
+    }
+
+  # aws_eks_node_group.node-2 will be destroyed
+  - resource "aws_eks_node_group" "node-2" {
+      - ami_type        = "AL2_x86_64" -> null
+      - arn             = "arn:aws:eks:us-east-1:000143974429:nodegroup/fullcycle-fc_course/node-2/c8c6687e-bcb7-3193-446c-f6b87c1f81cf" -> null
+      - capacity_type   = "ON_DEMAND" -> null
+      - cluster_name    = "fullcycle-fc_course" -> null
+      - disk_size       = 20 -> null
+      - id              = "fullcycle-fc_course:node-2" -> null
+      - instance_types  = [
+          - "t3.micro",
+        ] -> null
+      - labels          = {} -> null
+      - node_group_name = "node-2" -> null
+      - node_role_arn   = "arn:aws:iam::000143974429:role/fullcycle-fc_course-role-node" -> null
+      - release_version = "1.28.3-20231230" -> null
+      - resources       = [
+          - {
+              - autoscaling_groups              = [
+                  - {
+                      - name = "eks-node-2-c8c6687e-bcb7-3193-446c-f6b87c1f81cf"
+                    },
+                ]
+              - remote_access_security_group_id = ""
+            },
+        ] -> null
+      - status          = "ACTIVE" -> null
+      - subnet_ids      = [
+          - "subnet-01be84e8f03bc3b03",
+          - "subnet-0790eb91c54315d67",
+        ] -> null
+      - tags            = {} -> null
+      - tags_all        = {} -> null
+      - version         = "1.28" -> null
+
+      - scaling_config {
+          - desired_size = 2 -> null
+          - max_size     = 4 -> null
+          - min_size     = 2 -> null
+        }
+
+      - update_config {
+          - max_unavailable            = 1 -> null
+          - max_unavailable_percentage = 0 -> null
+        }
+    }
+
+  # aws_iam_role.cluster will be destroyed
+  - resource "aws_iam_role" "cluster" {
+      - arn                   = "arn:aws:iam::000143974429:role/fullcycle-fc_course-role" -> null
+      - assume_role_policy    = jsonencode(
+            {
+              - Statement = [
+                  - {
+                      - Action    = "sts:AssumeRole"
+                      - Effect    = "Allow"
+                      - Principal = {
+                          - Service = "eks.amazonaws.com"
+                        }
+                    },
+                ]
+              - Version   = "2012-10-17"
+            }
+        ) -> null
+      - create_date           = "2023-12-28T21:26:11Z" -> null
+      - force_detach_policies = false -> null
+      - id                    = "fullcycle-fc_course-role" -> null
+      - managed_policy_arns   = [
+          - "arn:aws:iam::aws:policy/AmazonEKSClusterPolicy",
+          - "arn:aws:iam::aws:policy/AmazonEKSVPCResourceController",
+        ] -> null
+      - max_session_duration  = 3600 -> null
+      - name                  = "fullcycle-fc_course-role" -> null
+      - path                  = "/" -> null
+      - tags                  = {} -> null
+      - tags_all              = {} -> null
+      - unique_id             = "AROAQACEU4AOXJTY3BLFP" -> null
+    }
+
+  # aws_iam_role.node will be destroyed
+  - resource "aws_iam_role" "node" {
+      - arn                   = "arn:aws:iam::000143974429:role/fullcycle-fc_course-role-node" -> null
+      - assume_role_policy    = jsonencode(
+            {
+              - Statement = [
+                  - {
+                      - Action    = "sts:AssumeRole"
+                      - Effect    = "Allow"
+                      - Principal = {
+                          - Service = "ec2.amazonaws.com"
+                        }
+                    },
+                ]
+              - Version   = "2012-10-17"
+            }
+        ) -> null
+      - create_date           = "2024-01-02T21:19:40Z" -> null
+      - force_detach_policies = false -> null
+      - id                    = "fullcycle-fc_course-role-node" -> null
+      - managed_policy_arns   = [
+          - "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly",
+          - "arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy",
+          - "arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy",
+        ] -> null
+      - max_session_duration  = 3600 -> null
+      - name                  = "fullcycle-fc_course-role-node" -> null
+      - path                  = "/" -> null
+      - tags                  = {} -> null
+      - tags_all              = {} -> null
+      - unique_id             = "AROAQACEU4AOW4HWOJU7U" -> null
+    }
+
+  # aws_iam_role_policy_attachment.cluster-AmazonEKSClusterPolicy will be destroyed
+  - resource "aws_iam_role_policy_attachment" "cluster-AmazonEKSClusterPolicy" {
+      - id         = "fullcycle-fc_course-role-20231228213737664400000001" -> null
+      - policy_arn = "arn:aws:iam::aws:policy/AmazonEKSClusterPolicy" -> null
+      - role       = "fullcycle-fc_course-role" -> null
+    }
+
+  # aws_iam_role_policy_attachment.cluster-AmazonEKSVPCResourceController will be destroyed
+  - resource "aws_iam_role_policy_attachment" "cluster-AmazonEKSVPCResourceController" {
+      - id         = "fullcycle-fc_course-role-20231228213311474100000001" -> null
+      - policy_arn = "arn:aws:iam::aws:policy/AmazonEKSVPCResourceController" -> null
+      - role       = "fullcycle-fc_course-role" -> null
+    }
+
+  # aws_iam_role_policy_attachment.node-AmazonEC2ContainerRegistryReadOnly will be destroyed
+  - resource "aws_iam_role_policy_attachment" "node-AmazonEC2ContainerRegistryReadOnly" {
+      - id         = "fullcycle-fc_course-role-node-20240103195149151600000002" -> null
+      - policy_arn = "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly" -> null
+      - role       = "fullcycle-fc_course-role-node" -> null
+    }
+
+  # aws_iam_role_policy_attachment.node-AmazonEKSWorkerNodePolicy will be destroyed
+  - resource "aws_iam_role_policy_attachment" "node-AmazonEKSWorkerNodePolicy" {
+      - id         = "fullcycle-fc_course-role-node-20240103195149143600000001" -> null
+      - policy_arn = "arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy" -> null
+      - role       = "fullcycle-fc_course-role-node" -> null
+    }
+
+  # aws_iam_role_policy_attachment.node-AmazonEKS_CNI_Policy will be destroyed
+  - resource "aws_iam_role_policy_attachment" "node-AmazonEKS_CNI_Policy" {
+      - id         = "fullcycle-fc_course-role-node-20240103195149330100000003" -> null
+      - policy_arn = "arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy" -> null
+      - role       = "fullcycle-fc_course-role-node" -> null
+    }
+
+  # aws_internet_gateway.new-igw will be destroyed
+  - resource "aws_internet_gateway" "new-igw" {
+      - arn      = "arn:aws:ec2:us-east-1:000143974429:internet-gateway/igw-0b401a42be706ee70" -> null
+      - id       = "igw-0b401a42be706ee70" -> null
+      - owner_id = "000143974429" -> null
+      - tags     = {
+          - "Name" = "fullcycle-igw"
+        } -> null
+      - tags_all = {
+          - "Name" = "fullcycle-igw"
+        } -> null
+      - vpc_id   = "vpc-0270a43b02cf93e62" -> null
+    }
+
+  # aws_route_table.new-rtb will be destroyed
+  - resource "aws_route_table" "new-rtb" {
+      - arn              = "arn:aws:ec2:us-east-1:000143974429:route-table/rtb-07e07bf5de48b5157" -> null
+      - id               = "rtb-07e07bf5de48b5157" -> null
+      - owner_id         = "000143974429" -> null
+      - propagating_vgws = [] -> null
+      - route            = [
+          - {
+              - carrier_gateway_id         = ""
+              - cidr_block                 = "0.0.0.0/0"
+              - core_network_arn           = ""
+              - destination_prefix_list_id = ""
+              - egress_only_gateway_id     = ""
+              - gateway_id                 = "igw-0b401a42be706ee70"
+              - ipv6_cidr_block            = ""
+              - local_gateway_id           = ""
+              - nat_gateway_id             = ""
+              - network_interface_id       = ""
+              - transit_gateway_id         = ""
+              - vpc_endpoint_id            = ""
+              - vpc_peering_connection_id  = ""
+            },
+        ] -> null
+      - tags             = {
+          - "Name" = "fullcycle-rtb"
+        } -> null
+      - tags_all         = {
+          - "Name" = "fullcycle-rtb"
+        } -> null
+      - vpc_id           = "vpc-0270a43b02cf93e62" -> null
+    }
+
+  # aws_route_table_association.new-rtb-association[0] will be destroyed
+  - resource "aws_route_table_association" "new-rtb-association" {
+      - id             = "rtbassoc-07c72896aad74cb06" -> null
+      - route_table_id = "rtb-07e07bf5de48b5157" -> null
+      - subnet_id      = "subnet-01be84e8f03bc3b03" -> null
+    }
+
+  # aws_route_table_association.new-rtb-association[1] will be destroyed
+  - resource "aws_route_table_association" "new-rtb-association" {
+      - id             = "rtbassoc-0738acac44b984c59" -> null
+      - route_table_id = "rtb-07e07bf5de48b5157" -> null
+      - subnet_id      = "subnet-0790eb91c54315d67" -> null
+    }
+
+  # aws_security_group.sg will be destroyed
+  - resource "aws_security_group" "sg" {
+      - arn                    = "arn:aws:ec2:us-east-1:000143974429:security-group/sg-094df25f9931ad7f9" -> null
+      - description            = "Managed by Terraform" -> null
+      - egress                 = [
+          - {
+              - cidr_blocks      = [
+                  - "0.0.0.0/0",
+                ]
+              - description      = ""
+              - from_port        = 0
+              - ipv6_cidr_blocks = []
+              - prefix_list_ids  = []
+              - protocol         = "-1"
+              - security_groups  = []
+              - self             = false
+              - to_port          = 0
+            },
+        ] -> null
+      - id                     = "sg-094df25f9931ad7f9" -> null
+      - ingress                = [] -> null
+      - name                   = "terraform-20231228203924887200000001" -> null
+      - name_prefix            = "terraform-" -> null
+      - owner_id               = "000143974429" -> null
+      - revoke_rules_on_delete = false -> null
+      - tags                   = {
+          - "Name" = "fullcycle-sg"
+        } -> null
+      - tags_all               = {
+          - "Name" = "fullcycle-sg"
+        } -> null
+      - vpc_id                 = "vpc-0270a43b02cf93e62" -> null
+    }
+
+  # aws_subnet.subnets[0] will be destroyed
+  - resource "aws_subnet" "subnets" {
+      - arn                                            = "arn:aws:ec2:us-east-1:000143974429:subnet/subnet-01be84e8f03bc3b03" -> null
+      - assign_ipv6_address_on_creation                = false -> null
+      - availability_zone                              = "us-east-1a" -> null
+      - availability_zone_id                           = "use1-az1" -> null
+      - cidr_block                                     = "10.0.0.0/24" -> null
+      - enable_dns64                                   = false -> null
+      - enable_lni_at_device_index                     = 0 -> null
+      - enable_resource_name_dns_a_record_on_launch    = false -> null
+      - enable_resource_name_dns_aaaa_record_on_launch = false -> null
+      - id                                             = "subnet-01be84e8f03bc3b03" -> null
+      - ipv6_native                                    = false -> null
+      - map_customer_owned_ip_on_launch                = false -> null
+      - map_public_ip_on_launch                        = true -> null
+      - owner_id                                       = "000143974429" -> null
+      - private_dns_hostname_type_on_launch            = "ip-name" -> null
+      - tags                                           = {
+          - "Name" = "fullcycle-subnet-0"
+        } -> null
+      - tags_all                                       = {
+          - "Name" = "fullcycle-subnet-0"
+        } -> null
+      - vpc_id                                         = "vpc-0270a43b02cf93e62" -> null
+    }
+
+  # aws_subnet.subnets[1] will be destroyed
+  - resource "aws_subnet" "subnets" {
+      - arn                                            = "arn:aws:ec2:us-east-1:000143974429:subnet/subnet-0790eb91c54315d67" -> null
+      - assign_ipv6_address_on_creation                = false -> null
+      - availability_zone                              = "us-east-1b" -> null
+      - availability_zone_id                           = "use1-az2" -> null
+      - cidr_block                                     = "10.0.1.0/24" -> null
+      - enable_dns64                                   = false -> null
+      - enable_lni_at_device_index                     = 0 -> null
+      - enable_resource_name_dns_a_record_on_launch    = false -> null
+      - enable_resource_name_dns_aaaa_record_on_launch = false -> null
+      - id                                             = "subnet-0790eb91c54315d67" -> null
+      - ipv6_native                                    = false -> null
+      - map_customer_owned_ip_on_launch                = false -> null
+      - map_public_ip_on_launch                        = true -> null
+      - owner_id                                       = "000143974429" -> null
+      - private_dns_hostname_type_on_launch            = "ip-name" -> null
+      - tags                                           = {
+          - "Name" = "fullcycle-subnet-1"
+        } -> null
+      - tags_all                                       = {
+          - "Name" = "fullcycle-subnet-1"
+        } -> null
+      - vpc_id                                         = "vpc-0270a43b02cf93e62" -> null
+    }
+
+  # aws_vpc.new-vpc will be destroyed
+  - resource "aws_vpc" "new-vpc" {
+      - arn                                  = "arn:aws:ec2:us-east-1:000143974429:vpc/vpc-0270a43b02cf93e62" -> null
+      - assign_generated_ipv6_cidr_block     = false -> null
+      - cidr_block                           = "10.0.0.0/16" -> null
+      - default_network_acl_id               = "acl-05a5cf5d3dabc2dd0" -> null
+      - default_route_table_id               = "rtb-078309cc76184a5de" -> null
+      - default_security_group_id            = "sg-0cafd339b9cb9792c" -> null
+      - dhcp_options_id                      = "dopt-0c824a871bc167c23" -> null
+      - enable_dns_hostnames                 = false -> null
+      - enable_dns_support                   = true -> null
+      - enable_network_address_usage_metrics = false -> null
+      - id                                   = "vpc-0270a43b02cf93e62" -> null
+      - instance_tenancy                     = "default" -> null
+      - ipv6_netmask_length                  = 0 -> null
+      - main_route_table_id                  = "rtb-078309cc76184a5de" -> null
+      - owner_id                             = "000143974429" -> null
+      - tags                                 = {
+          - "Name" = "fullcycle-vpc"
+        } -> null
+      - tags_all                             = {
+          - "Name" = "fullcycle-vpc"
+        } -> null
+    }
+
+  # local_file.kubeconfig will be destroyed
+  - resource "local_file" "kubeconfig" {
+      - content              = <<-EOT
+            apiVersion: v1
+            clusters:
+            - cluster:
+                server: https://F6F52A2747F96DB7047D381423AD4CE6.gr7.us-east-1.eks.amazonaws.com
+                certificate-authority-data: LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSURCVENDQWUyZ0F3SUJBZ0lJWmVadXQ0a3VQa2t3RFFZSktvWklodmNOQVFFTEJRQXdGVEVUTUJFR0ExVUUKQXhNS2EzVmlaWEp1WlhSbGN6QWVGdzB5TkRBeE1ESXlNVEE0TlRSYUZ3MHpNekV5TXpBeU1URXpOVFJhTUJVeApFekFSQmdOVkJBTVRDbXQxWW1WeWJtVjBaWE13Z2dFaU1BMEdDU3FHU0liM0RRRUJBUVVBQTRJQkR3QXdnZ0VLCkFvSUJBUURuQzNWMWdrZTcrZ2JHa2lUNUdtbzdTQ3pkeVZZU25KcTJXSFRNNGEwUis2YVg3LzhtbmpUQ0dLUEIKcXFGcUJ5VmZIbnV5SU01WE9kL3lteWFPNXExdldjcVhZUTRCQm1lLy96YkxsYms5Y3FqdkxrMWZ0MlNBWVdBUQpwQzdJT1M5Q3YyQmtyRndncU1xeVpHMmNYSDlEWGx0Q0dyWWUrN2R3WmN5MGFpb1NYTytMempDYUhsTHBFRm1vCjRVRDltZTlBR2dzZld5a1dlV1loWGw5LzVLQ0JTNldPdmZiYTFwd2Q3UzljNzIyeUVQazBrcks1Wk94TTJkMFYKSktraVFJdG5ROVBMbVBENHNTSlJITnZLL2c0VjUrTThsTkxDYkpCQnFVL203MUxNYlBIbVhUQ1NMU0pjdUNUcgpYQ3Uyb2Z0UmJXY2tIYWpWY3pSWkVLbkFyRFFQQWdNQkFBR2pXVEJYTUE0R0ExVWREd0VCL3dRRUF3SUNwREFQCkJnTlZIUk1CQWY4RUJUQURBUUgvTUIwR0ExVWREZ1FXQkJSL0lHWTE5U2c2TnlxajBNUWtoOHRPWW4ycUJ6QVYKQmdOVkhSRUVEakFNZ2dwcmRXSmxjbTVsZEdWek1BMEdDU3FHU0liM0RRRUJDd1VBQTRJQkFRQXUrVGFBWjNQUApkNFF4bW11SVZ2OXMxMTNELzBhd3JGR1NrakkxaTVZc2k4S25QT2Nob2xWdjEra2lKbG5zNE5PSzlDWmhzcE5XClV2QWh3aklLSFViN3hMR1VuNGZmSlROUmhpY2prUytxUTZBdDRDMzBLaC93R3BRUHFDQlZmRytPSkI2RDNHQXAKUG5HckFyeEgvTk5GYUxzOEc4cnNNMy9zRjRQbEZIcFV5U3BnQUMwa2RNV3RQRHZOcExzaEJ1cnVzcDRlNnlnawpFc3F5MGRlZXpTTURyN0ZjYU9IemoyQnZJRjZzazZ6eVlyRndINURGTGRKVGlHWHFaa1BuWGV2VUVWcGdCZWFrCjY0cDQrcVRaRjRuTVlTdEZzM2pOQ3ZLSWpYaUJWRUIwdUVVeXB4M3UzNUU0T2NVUFJjVUphZzN0RnQ0STNZM2gKSjVtendwdFFBTUJaCi0tLS0tRU5EIENFUlRJRklDQVRFLS0tLS0K
+              name: kubernetes
+            contexts:
+            - context:
+                cluster: kubernetes
+                user: "fullcycle-fc_course"
+              name: "fullcycle-fc_course"
+            current-context: "fullcycle-fc_course"
+            kind: Config
+            preferences: {}
+            users:
+            - name: "fullcycle-fc_course"
+              user:
+                exec:
+                  apiVersion: client.authentication.k8s.io/v1alpha1
+                  command: aws-iam-authenticator
+                  args:
+                    - "token"
+                    - "-i"
+                    - "fullcycle-fc_course"
+        EOT -> null
+      - content_base64sha256 = "tblmFbjMNrrJ+UIdt5J1/CWSAdTix70R0g2fjbuexsI=" -> null
+      - content_base64sha512 = "9GM8sHtGpqU/y5NvC2cM+eG3RvkhHgH496kHx6laxQ1En24Wbak5fOh6GtgO/jBh+fVBfoyAkkEPCKwUapCyBg==" -> null
+      - content_md5          = "3f9958e12ceecabd58b5a57f477f0c75" -> null
+      - content_sha1         = "5eec93cc066fb1246dd9cd3cd160393f60526218" -> null
+      - content_sha256       = "b5b96615b8cc36bac9f9421db79275fc259201d4e2c7bd11d20d9f8dbb9ec6c2" -> null
+      - content_sha512       = "f4633cb07b46a6a53fcb936f0b670cf9e1b746f9211e01f8f7a907c7a95ac50d449f6e166da9397ce87a1ad80efe3061f9f5417e8c8092410f08ac146a90b206" -> null
+      - directory_permission = "0777" -> null
+      - file_permission      = "0777" -> null
+      - filename             = "kubeconfig" -> null
+      - id                   = "5eec93cc066fb1246dd9cd3cd160393f60526218" -> null
+    }
+
+Plan: 0 to add, 0 to change, 20 to destroy.
+
+Do you really want to destroy all resources?
+  Terraform will destroy all your managed infrastructure, as shown above.
+  There is no undo. Only 'yes' will be accepted to confirm.
+
+  Enter a value: yes
+
+local_file.kubeconfig: Destroying... [id=5eec93cc066fb1246dd9cd3cd160393f60526218]
+local_file.kubeconfig: Destruction complete after 0s
+aws_route_table_association.new-rtb-association[1]: Destroying... [id=rtbassoc-0738acac44b984c59]
+aws_route_table_association.new-rtb-association[0]: Destroying... [id=rtbassoc-07c72896aad74cb06]
+aws_eks_node_group.node-2: Destroying... [id=fullcycle-fc_course:node-2]
+aws_eks_node_group.node-1: Destroying... [id=fullcycle-fc_course:node-1]
+aws_route_table_association.new-rtb-association[1]: Destruction complete after 1s
+aws_route_table_association.new-rtb-association[0]: Destruction complete after 1s
+aws_route_table.new-rtb: Destroying... [id=rtb-07e07bf5de48b5157]
+aws_route_table.new-rtb: Destruction complete after 1s
+aws_internet_gateway.new-igw: Destroying... [id=igw-0b401a42be706ee70]
+aws_eks_node_group.node-2: Still destroying... [id=fullcycle-fc_course:node-2, 10s elapsed]
+aws_eks_node_group.node-1: Still destroying... [id=fullcycle-fc_course:node-1, 10s elapsed]
+aws_internet_gateway.new-igw: Still destroying... [id=igw-0b401a42be706ee70, 10s elapsed]
+aws_eks_node_group.node-1: Still destroying... [id=fullcycle-fc_course:node-1, 20s elapsed]
+aws_eks_node_group.node-2: Still destroying... [id=fullcycle-fc_course:node-2, 20s elapsed]
+aws_internet_gateway.new-igw: Still destroying... [id=igw-0b401a42be706ee70, 20s elapsed]
+aws_eks_node_group.node-2: Still destroying... [id=fullcycle-fc_course:node-2, 30s elapsed]
+aws_eks_node_group.node-1: Still destroying... [id=fullcycle-fc_course:node-1, 30s elapsed]
+aws_internet_gateway.new-igw: Still destroying... [id=igw-0b401a42be706ee70, 30s elapsed]
+aws_eks_node_group.node-2: Still destroying... [id=fullcycle-fc_course:node-2, 40s elapsed]
+aws_eks_node_group.node-1: Still destroying... [id=fullcycle-fc_course:node-1, 40s elapsed]
+aws_internet_gateway.new-igw: Still destroying... [id=igw-0b401a42be706ee70, 40s elapsed]
+aws_eks_node_group.node-2: Still destroying... [id=fullcycle-fc_course:node-2, 50s elapsed]
+aws_eks_node_group.node-1: Still destroying... [id=fullcycle-fc_course:node-1, 50s elapsed]
+aws_internet_gateway.new-igw: Still destroying... [id=igw-0b401a42be706ee70, 50s elapsed]
+aws_eks_node_group.node-1: Still destroying... [id=fullcycle-fc_course:node-1, 1m0s elapsed]
+aws_eks_node_group.node-2: Still destroying... [id=fullcycle-fc_course:node-2, 1m0s elapsed]
+aws_internet_gateway.new-igw: Still destroying... [id=igw-0b401a42be706ee70, 1m0s elapsed]
+aws_eks_node_group.node-2: Still destroying... [id=fullcycle-fc_course:node-2, 1m10s elapsed]
+aws_eks_node_group.node-1: Still destroying... [id=fullcycle-fc_course:node-1, 1m10s elapsed]
+aws_internet_gateway.new-igw: Still destroying... [id=igw-0b401a42be706ee70, 1m10s elapsed]
+aws_eks_node_group.node-1: Still destroying... [id=fullcycle-fc_course:node-1, 1m20s elapsed]
+aws_eks_node_group.node-2: Still destroying... [id=fullcycle-fc_course:node-2, 1m20s elapsed]
+aws_internet_gateway.new-igw: Still destroying... [id=igw-0b401a42be706ee70, 1m20s elapsed]
+aws_eks_node_group.node-2: Still destroying... [id=fullcycle-fc_course:node-2, 1m30s elapsed]
+aws_eks_node_group.node-1: Still destroying... [id=fullcycle-fc_course:node-1, 1m30s elapsed]
+aws_internet_gateway.new-igw: Still destroying... [id=igw-0b401a42be706ee70, 1m30s elapsed]
+aws_eks_node_group.node-1: Still destroying... [id=fullcycle-fc_course:node-1, 1m40s elapsed]
+aws_eks_node_group.node-2: Still destroying... [id=fullcycle-fc_course:node-2, 1m40s elapsed]
+aws_internet_gateway.new-igw: Still destroying... [id=igw-0b401a42be706ee70, 1m40s elapsed]
+aws_eks_node_group.node-1: Still destroying... [id=fullcycle-fc_course:node-1, 1m50s elapsed]
+aws_eks_node_group.node-2: Still destroying... [id=fullcycle-fc_course:node-2, 1m50s elapsed]
+aws_internet_gateway.new-igw: Still destroying... [id=igw-0b401a42be706ee70, 1m50s elapsed]
+aws_eks_node_group.node-2: Still destroying... [id=fullcycle-fc_course:node-2, 2m0s elapsed]
+aws_eks_node_group.node-1: Still destroying... [id=fullcycle-fc_course:node-1, 2m0s elapsed]
+aws_internet_gateway.new-igw: Still destroying... [id=igw-0b401a42be706ee70, 2m0s elapsed]
+aws_eks_node_group.node-1: Still destroying... [id=fullcycle-fc_course:node-1, 2m10s elapsed]
+aws_eks_node_group.node-2: Still destroying... [id=fullcycle-fc_course:node-2, 2m10s elapsed]
+aws_internet_gateway.new-igw: Still destroying... [id=igw-0b401a42be706ee70, 2m10s elapsed]
+aws_eks_node_group.node-2: Still destroying... [id=fullcycle-fc_course:node-2, 2m20s elapsed]
+aws_eks_node_group.node-1: Still destroying... [id=fullcycle-fc_course:node-1, 2m20s elapsed]
+aws_internet_gateway.new-igw: Still destroying... [id=igw-0b401a42be706ee70, 2m20s elapsed]
+aws_eks_node_group.node-1: Still destroying... [id=fullcycle-fc_course:node-1, 2m30s elapsed]
+aws_eks_node_group.node-2: Still destroying... [id=fullcycle-fc_course:node-2, 2m30s elapsed]
+aws_internet_gateway.new-igw: Still destroying... [id=igw-0b401a42be706ee70, 2m30s elapsed]
+aws_eks_node_group.node-1: Still destroying... [id=fullcycle-fc_course:node-1, 2m40s elapsed]
+aws_eks_node_group.node-2: Still destroying... [id=fullcycle-fc_course:node-2, 2m40s elapsed]
+aws_internet_gateway.new-igw: Still destroying... [id=igw-0b401a42be706ee70, 2m40s elapsed]
+aws_eks_node_group.node-1: Still destroying... [id=fullcycle-fc_course:node-1, 2m50s elapsed]
+aws_eks_node_group.node-2: Still destroying... [id=fullcycle-fc_course:node-2, 2m50s elapsed]
+aws_internet_gateway.new-igw: Still destroying... [id=igw-0b401a42be706ee70, 2m50s elapsed]
+aws_eks_node_group.node-1: Still destroying... [id=fullcycle-fc_course:node-1, 3m0s elapsed]
+aws_eks_node_group.node-2: Still destroying... [id=fullcycle-fc_course:node-2, 3m0s elapsed]
+aws_internet_gateway.new-igw: Still destroying... [id=igw-0b401a42be706ee70, 3m0s elapsed]
+aws_eks_node_group.node-2: Still destroying... [id=fullcycle-fc_course:node-2, 3m10s elapsed]
+aws_eks_node_group.node-1: Still destroying... [id=fullcycle-fc_course:node-1, 3m10s elapsed]
+aws_internet_gateway.new-igw: Still destroying... [id=igw-0b401a42be706ee70, 3m10s elapsed]
+aws_eks_node_group.node-2: Still destroying... [id=fullcycle-fc_course:node-2, 3m20s elapsed]
+aws_eks_node_group.node-1: Still destroying... [id=fullcycle-fc_course:node-1, 3m20s elapsed]
+aws_internet_gateway.new-igw: Still destroying... [id=igw-0b401a42be706ee70, 3m20s elapsed]
+aws_eks_node_group.node-2: Still destroying... [id=fullcycle-fc_course:node-2, 3m30s elapsed]
+aws_eks_node_group.node-1: Still destroying... [id=fullcycle-fc_course:node-1, 3m30s elapsed]
+aws_internet_gateway.new-igw: Still destroying... [id=igw-0b401a42be706ee70, 3m30s elapsed]
+aws_eks_node_group.node-1: Still destroying... [id=fullcycle-fc_course:node-1, 3m40s elapsed]
+aws_eks_node_group.node-2: Still destroying... [id=fullcycle-fc_course:node-2, 3m40s elapsed]
+aws_internet_gateway.new-igw: Still destroying... [id=igw-0b401a42be706ee70, 3m40s elapsed]
+aws_eks_node_group.node-2: Still destroying... [id=fullcycle-fc_course:node-2, 3m50s elapsed]
+aws_eks_node_group.node-1: Still destroying... [id=fullcycle-fc_course:node-1, 3m50s elapsed]
+aws_internet_gateway.new-igw: Still destroying... [id=igw-0b401a42be706ee70, 3m50s elapsed]
+aws_eks_node_group.node-1: Still destroying... [id=fullcycle-fc_course:node-1, 4m0s elapsed]
+aws_eks_node_group.node-2: Still destroying... [id=fullcycle-fc_course:node-2, 4m0s elapsed]
+aws_internet_gateway.new-igw: Still destroying... [id=igw-0b401a42be706ee70, 4m0s elapsed]
+aws_eks_node_group.node-1: Still destroying... [id=fullcycle-fc_course:node-1, 4m10s elapsed]
+aws_eks_node_group.node-2: Still destroying... [id=fullcycle-fc_course:node-2, 4m10s elapsed]
+aws_internet_gateway.new-igw: Still destroying... [id=igw-0b401a42be706ee70, 4m10s elapsed]
+aws_eks_node_group.node-1: Still destroying... [id=fullcycle-fc_course:node-1, 4m20s elapsed]
+aws_eks_node_group.node-2: Still destroying... [id=fullcycle-fc_course:node-2, 4m20s elapsed]
+aws_internet_gateway.new-igw: Still destroying... [id=igw-0b401a42be706ee70, 4m20s elapsed]
+aws_eks_node_group.node-1: Still destroying... [id=fullcycle-fc_course:node-1, 4m30s elapsed]
+aws_eks_node_group.node-2: Still destroying... [id=fullcycle-fc_course:node-2, 4m30s elapsed]
+aws_internet_gateway.new-igw: Still destroying... [id=igw-0b401a42be706ee70, 4m30s elapsed]
+aws_eks_node_group.node-2: Still destroying... [id=fullcycle-fc_course:node-2, 4m40s elapsed]
+aws_eks_node_group.node-1: Still destroying... [id=fullcycle-fc_course:node-1, 4m40s elapsed]
+aws_internet_gateway.new-igw: Still destroying... [id=igw-0b401a42be706ee70, 4m40s elapsed]
+aws_eks_node_group.node-2: Still destroying... [id=fullcycle-fc_course:node-2, 4m50s elapsed]
+aws_eks_node_group.node-1: Still destroying... [id=fullcycle-fc_course:node-1, 4m50s elapsed]
+aws_internet_gateway.new-igw: Still destroying... [id=igw-0b401a42be706ee70, 4m50s elapsed]
+aws_eks_node_group.node-2: Still destroying... [id=fullcycle-fc_course:node-2, 5m0s elapsed]
+aws_eks_node_group.node-1: Still destroying... [id=fullcycle-fc_course:node-1, 5m0s elapsed]
+aws_internet_gateway.new-igw: Still destroying... [id=igw-0b401a42be706ee70, 5m0s elapsed]
+aws_eks_node_group.node-2: Still destroying... [id=fullcycle-fc_course:node-2, 5m10s elapsed]
+aws_eks_node_group.node-1: Still destroying... [id=fullcycle-fc_course:node-1, 5m10s elapsed]
+aws_internet_gateway.new-igw: Still destroying... [id=igw-0b401a42be706ee70, 5m10s elapsed]
+aws_eks_node_group.node-1: Still destroying... [id=fullcycle-fc_course:node-1, 5m20s elapsed]
+aws_eks_node_group.node-2: Still destroying... [id=fullcycle-fc_course:node-2, 5m20s elapsed]
+aws_internet_gateway.new-igw: Still destroying... [id=igw-0b401a42be706ee70, 5m20s elapsed]
+aws_eks_node_group.node-2: Still destroying... [id=fullcycle-fc_course:node-2, 5m30s elapsed]
+aws_eks_node_group.node-1: Still destroying... [id=fullcycle-fc_course:node-1, 5m30s elapsed]
+aws_internet_gateway.new-igw: Still destroying... [id=igw-0b401a42be706ee70, 5m30s elapsed]
+aws_eks_node_group.node-2: Still destroying... [id=fullcycle-fc_course:node-2, 5m40s elapsed]
+aws_eks_node_group.node-1: Still destroying... [id=fullcycle-fc_course:node-1, 5m40s elapsed]
+aws_internet_gateway.new-igw: Still destroying... [id=igw-0b401a42be706ee70, 5m40s elapsed]
+aws_eks_node_group.node-2: Still destroying... [id=fullcycle-fc_course:node-2, 5m50s elapsed]
+aws_eks_node_group.node-1: Still destroying... [id=fullcycle-fc_course:node-1, 5m50s elapsed]
+aws_internet_gateway.new-igw: Still destroying... [id=igw-0b401a42be706ee70, 5m50s elapsed]
+aws_eks_node_group.node-2: Still destroying... [id=fullcycle-fc_course:node-2, 6m0s elapsed]
+aws_eks_node_group.node-1: Still destroying... [id=fullcycle-fc_course:node-1, 6m0s elapsed]
+aws_internet_gateway.new-igw: Still destroying... [id=igw-0b401a42be706ee70, 6m0s elapsed]
+aws_eks_node_group.node-1: Still destroying... [id=fullcycle-fc_course:node-1, 6m10s elapsed]
+aws_eks_node_group.node-2: Still destroying... [id=fullcycle-fc_course:node-2, 6m10s elapsed]
+aws_internet_gateway.new-igw: Still destroying... [id=igw-0b401a42be706ee70, 6m10s elapsed]
+aws_internet_gateway.new-igw: Destruction complete after 6m12s
+aws_eks_node_group.node-1: Still destroying... [id=fullcycle-fc_course:node-1, 6m20s elapsed]
+aws_eks_node_group.node-2: Still destroying... [id=fullcycle-fc_course:node-2, 6m20s elapsed]
+aws_eks_node_group.node-1: Still destroying... [id=fullcycle-fc_course:node-1, 6m30s elapsed]
+aws_eks_node_group.node-2: Still destroying... [id=fullcycle-fc_course:node-2, 6m30s elapsed]
+aws_eks_node_group.node-2: Destruction complete after 6m37s
+aws_eks_node_group.node-1: Still destroying... [id=fullcycle-fc_course:node-1, 6m40s elapsed]
+aws_eks_node_group.node-1: Still destroying... [id=fullcycle-fc_course:node-1, 6m50s elapsed]
+aws_eks_node_group.node-1: Still destroying... [id=fullcycle-fc_course:node-1, 7m0s elapsed]
+aws_eks_node_group.node-1: Still destroying... [id=fullcycle-fc_course:node-1, 7m10s elapsed]
+aws_eks_node_group.node-1: Still destroying... [id=fullcycle-fc_course:node-1, 7m20s elapsed]
+aws_eks_node_group.node-1: Still destroying... [id=fullcycle-fc_course:node-1, 7m30s elapsed]
+aws_eks_node_group.node-1: Still destroying... [id=fullcycle-fc_course:node-1, 7m40s elapsed]
+aws_eks_node_group.node-1: Still destroying... [id=fullcycle-fc_course:node-1, 7m50s elapsed]
+aws_eks_node_group.node-1: Still destroying... [id=fullcycle-fc_course:node-1, 8m0s elapsed]
+aws_eks_node_group.node-1: Still destroying... [id=fullcycle-fc_course:node-1, 8m10s elapsed]
+aws_eks_node_group.node-1: Destruction complete after 8m20s
+aws_iam_role_policy_attachment.node-AmazonEKSWorkerNodePolicy: Destroying... [id=fullcycle-fc_course-role-node-20240103195149143600000001]
+aws_iam_role_policy_attachment.node-AmazonEKS_CNI_Policy: Destroying... [id=fullcycle-fc_course-role-node-20240103195149330100000003]
+aws_iam_role_policy_attachment.node-AmazonEC2ContainerRegistryReadOnly: Destroying... [id=fullcycle-fc_course-role-node-20240103195149151600000002]
+aws_eks_cluster.cluster: Destroying... [id=fullcycle-fc_course]
+aws_iam_role_policy_attachment.node-AmazonEC2ContainerRegistryReadOnly: Destruction complete after 0s
+aws_iam_role_policy_attachment.node-AmazonEKSWorkerNodePolicy: Destruction complete after 0s
+aws_iam_role_policy_attachment.node-AmazonEKS_CNI_Policy: Destruction complete after 0s
+aws_iam_role.node: Destroying... [id=fullcycle-fc_course-role-node]
+aws_iam_role.node: Destruction complete after 1s
+aws_eks_cluster.cluster: Still destroying... [id=fullcycle-fc_course, 10s elapsed]
+aws_eks_cluster.cluster: Still destroying... [id=fullcycle-fc_course, 20s elapsed]
+aws_eks_cluster.cluster: Still destroying... [id=fullcycle-fc_course, 30s elapsed]
+aws_eks_cluster.cluster: Still destroying... [id=fullcycle-fc_course, 40s elapsed]
+aws_eks_cluster.cluster: Still destroying... [id=fullcycle-fc_course, 50s elapsed]
+aws_eks_cluster.cluster: Still destroying... [id=fullcycle-fc_course, 1m0s elapsed]
+aws_eks_cluster.cluster: Still destroying... [id=fullcycle-fc_course, 1m10s elapsed]
+aws_eks_cluster.cluster: Still destroying... [id=fullcycle-fc_course, 1m20s elapsed]
+aws_eks_cluster.cluster: Still destroying... [id=fullcycle-fc_course, 1m30s elapsed]
+aws_eks_cluster.cluster: Destruction complete after 1m36s
+aws_iam_role_policy_attachment.cluster-AmazonEKSClusterPolicy: Destroying... [id=fullcycle-fc_course-role-20231228213737664400000001]
+aws_cloudwatch_log_group.log: Destroying... [id=/aws/eks/fullcycle-fc_course/cluster]
+aws_iam_role_policy_attachment.cluster-AmazonEKSVPCResourceController: Destroying... [id=fullcycle-fc_course-role-20231228213311474100000001]
+aws_subnet.subnets[1]: Destroying... [id=subnet-0790eb91c54315d67]
+aws_security_group.sg: Destroying... [id=sg-094df25f9931ad7f9]
+aws_subnet.subnets[0]: Destroying... [id=subnet-01be84e8f03bc3b03]
+aws_cloudwatch_log_group.log: Destruction complete after 0s
+aws_iam_role_policy_attachment.cluster-AmazonEKSVPCResourceController: Destruction complete after 0s
+aws_iam_role_policy_attachment.cluster-AmazonEKSClusterPolicy: Destruction complete after 0s
+aws_iam_role.cluster: Destroying... [id=fullcycle-fc_course-role]
+aws_subnet.subnets[1]: Destruction complete after 1s
+aws_subnet.subnets[0]: Destruction complete after 1s
+aws_iam_role.cluster: Destruction complete after 1s
+aws_security_group.sg: Destruction complete after 1s
+aws_vpc.new-vpc: Destroying... [id=vpc-0270a43b02cf93e62]
+aws_vpc.new-vpc: Destruction complete after 1s
+
+Destroy complete! Resources: 20 destroyed.
+```
+
+Pronto! A partir de agora ele vai destruir desde a vpc, route table, maquinas, cluster e tudo mais como se nada tivesse acontecido. E se quiser pessoa quiser utilizar, basta mudar as variáveis e subir tudo novamente!
+
+
+# Módulos
+## Introduçao aos modulos
+
+Vamos trabalhar no terraform com os modulos!
+
+O que acontece eh que quando estavamos mostrando o registry, existe os providers e os modulos
+
+O modulo eh cum conceito de agrupamento de resources e colcoa tudo junto! Entao pegamos apenas a chama do modulo e ele executa tudo para nós e no terraform ele ja tem modulos para tudo
+
+Vamos converter tudo o que ja vimos para podermos trabalhar com os modulos:
+
+## Criando modulo de VPC
+A primeira coisa para pensar eh quando temos muitos resources juntos vale a pena criar um modulo. Apenas um resource nao vale a pena
+
+Vamos criar um diretorio modules/vpc
+Ele vai configurar tudo que refere a redes
+O arquivo main.tf eh onde concentraremos todos os nossos resources
+O arquivo outputys.tf eh onde faremos os outputs dos resultados
+e o variables.tf sao asvariaveis que usaremos
+
+vamos copiar tudo em vpc.tf e copiar para o main.tf. Entretanto a diferença eh que estamos utilizando uma variavel. Vamos copiar a variavel de prefixo para as variaveis
+
+Em diversos momentos temos que usar as subnets que criamos. Vamos começar a perceber que quando formos utilizar vamos precisar de mais algumas outras variaveis.
+
+Por enquanto, o noiss output erstá em branco e vamos apacar o vpc da raiz pois nao vamos utilizar mais ele!
+
+O proximo video vamos pegar infos desse modulo para criarmos o nosso cluster!
+
+## Iniciando módulo do EKS
+Vamos criar o nosso seegundo modulo chamado eks/main outputs variables
+
+A primeira coisa eh copiar o cluster.tf para o main.tf do eks. Mas nao eh sh isso. a variavel aws_vpc.new-vpc.id vem da vpc!
+
+Como vamos conseguir as infos? Vamos trabalhar com as variaveis
+```tf
+resource "aws_security_group" "sg" {
+  vpc_id = var.vpc_id
+  egress {
+    from_port = 0
+    to_port = 0
+    protocol = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+    prefix_list_ids = []
+  }
+  tags = {
+    Name = "${var.prefix}-sg"
+  }
+}
+```
+
+A variavel `var.vpc_id` nao existe ainda entao vamos criála em variables.tf e acresentar a variavel de prefix e cluster name, retantion_days e tb DOS IDS DE NOSSAS SUBNETS! eSSES IDS ESTAVAM VINDO DE UM RELACIONAMENTO ANTERIOR QUE NAO VAI MAIS ACONTECER AGORA.
+
+```tf
+variable "vpc_id" {}
+variable "prefix" {}
+variable "cluster_name" {}
+variable "retention_days" {}
+variable "subnet_ids" {}
+```
+
+E ajustar o arquivo main.tf
+```tf
+resource "aws_security_group" "sg" {
+  vpc_id = var.vpc_id
+  egress {
+    from_port = 0
+    to_port = 0
+    protocol = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+    prefix_list_ids = []
+  }
+  tags = {
+    Name = "${var.prefix}-sg"
+  }
+}
+
+resource "aws_iam_role" "cluster" {
+  name = "${var.prefix}-${var.cluster_name}-role"
+  assume_role_policy = <<POLICY
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Principal": {
+        "Service": "eks.amazonaws.com"
+      },
+      "Action": "sts:AssumeRole"
+    }
+  ]
+}
+POLICY
+}
+
+resource "aws_iam_role_policy_attachment" "cluster-AmazonEKSVPCResourceController" {
+  role = aws_iam_role.cluster.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEKSVPCResourceController"
+}
+
+resource "aws_iam_role_policy_attachment" "cluster-AmazonEKSClusterPolicy" {
+  role = aws_iam_role.cluster.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEKSClusterPolicy"
+}
+
+resource "aws_cloudwatch_log_group" "log" {
+  name = "/aws/eks/${var.prefix}-${var.cluster_name}/cluster"
+  retention_in_days = var.retention_days
+}
+
+resource "aws_eks_cluster" "cluster" {
+  name = "${var.prefix}-${var.cluster_name}"
+  role_arn = aws_iam_role.cluster.arn
+  enabled_cluster_log_types = ["api", "audit"]
+  vpc_config {
+    subnet_ids = var.subnet_ids
+    security_group_ids = [aws_security_group.sg.id]
+  }
+  depends_on = [ 
+    aws_cloudwatch_log_group.log,
+    aws_iam_role_policy_attachment.cluster-AmazonEKSVPCResourceController,
+    aws_iam_role_policy_attachment.cluster-AmazonEKSClusterPolicy,
+  ]
+}
+```
+
+Vamos apagar o arquivo cluster.tf da raiz e copiar todo o conteudo de nodes.tf para o main do eks tb no final do atquivo r incluir as variaveis faltantes:
+```tf
+variable "vpc_id" {}
+variable "prefix" {}
+variable "cluster_name" {}
+variable "retention_days" {}
+variable "subnet_ids" {}
+variable "desired_size" {}
+variable "max_size" {}
+variable "min_size" {}
+```
+
+ ajustando o main.tf:
+ ```tf
+ resource "aws_security_group" "sg" {
+  vpc_id = var.vpc_id
+  egress {
+    from_port = 0
+    to_port = 0
+    protocol = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+    prefix_list_ids = []
+  }
+  tags = {
+    Name = "${var.prefix}-sg"
+  }
+}
+
+resource "aws_iam_role" "cluster" {
+  name = "${var.prefix}-${var.cluster_name}-role"
+  assume_role_policy = <<POLICY
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Principal": {
+        "Service": "eks.amazonaws.com"
+      },
+      "Action": "sts:AssumeRole"
+    }
+  ]
+}
+POLICY
+}
+
+resource "aws_iam_role_policy_attachment" "cluster-AmazonEKSVPCResourceController" {
+  role = aws_iam_role.cluster.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEKSVPCResourceController"
+}
+
+resource "aws_iam_role_policy_attachment" "cluster-AmazonEKSClusterPolicy" {
+  role = aws_iam_role.cluster.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEKSClusterPolicy"
+}
+
+resource "aws_cloudwatch_log_group" "log" {
+  name = "/aws/eks/${var.prefix}-${var.cluster_name}/cluster"
+  retention_in_days = var.retention_days
+}
+
+resource "aws_eks_cluster" "cluster" {
+  name = "${var.prefix}-${var.cluster_name}"
+  role_arn = aws_iam_role.cluster.arn
+  enabled_cluster_log_types = ["api", "audit"]
+  vpc_config {
+    subnet_ids = var.subnet_ids
+    security_group_ids = [aws_security_group.sg.id]
+  }
+  depends_on = [ 
+    aws_cloudwatch_log_group.log,
+    aws_iam_role_policy_attachment.cluster-AmazonEKSVPCResourceController,
+    aws_iam_role_policy_attachment.cluster-AmazonEKSClusterPolicy,
+  ]
+}
+
+resource "aws_iam_role" "node" {
+  name = "${var.prefix}-${var.cluster_name}-role-node"
+  assume_role_policy = <<POLICY
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Principal": {
+        "Service": "ec2.amazonaws.com"
+      },
+      "Action": "sts:AssumeRole"
+    }
+  ]
+}
+POLICY
+}
+
+resource "aws_iam_role_policy_attachment" "node-AmazonEKSWorkerNodePolicy" {
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy"
+  role = aws_iam_role.node.name
+}
+
+resource "aws_iam_role_policy_attachment" "node-AmazonEKS_CNI_Policy" {
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy"
+  role = aws_iam_role.node.name
+}
+
+resource "aws_iam_role_policy_attachment" "node-AmazonEC2ContainerRegistryReadOnly" {
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly"
+  role = aws_iam_role.node.name
+}
+
+resource "aws_eks_node_group" "node-1" {
+  cluster_name = aws_eks_cluster.cluster.name
+  node_group_name = "node-1"
+  node_role_arn = aws_iam_role.node.arn
+  subnet_ids = var.subnet_ids
+  instance_types = ["t3.micro"]
+  scaling_config {
+    desired_size = var.desired_size
+    max_size = var.max_size
+    min_size = var.min_size
+  }
+  depends_on = [ 
+    aws_iam_role_policy_attachment.node-AmazonEKSWorkerNodePolicy,
+    aws_iam_role_policy_attachment.node-AmazonEKS_CNI_Policy,
+    aws_iam_role_policy_attachment.node-AmazonEC2ContainerRegistryReadOnly,
+  ]
+}
+```
+
+## Finalizando módulos
+Vamos acertar alguns detalhes
+Vamos deletar o nodes.tf
+
+Entao temos os modulos eks e vpc e utilizar os modulos quando formos trabalhar.
+Vamos criar um main.tf na pasta raiz pq eh nele que vmaos utilizar a criaçao de modulos.
+
+Alem disso, vamos fazer o cidr_block virar uma variavel em vpc/main.tf
+```tf
+
+```
+
+## Criando nosso cluster com Módulos
+qUANDO UM MODULO PRECISA DE UM DADO DO OUTRO, FAZEMOS VIA OUTPUT.
+
+Agora vamos colcoar para rodar
+
+Primeiramente, o terraform nao sabe da existencia dos modulos ainda. Precisamos agora inicializar os modulos.
+
+```bash
+❯ terraform init
+
+Initializing the backend...
+Initializing modules...
+- eks in modules/eks
+- new-vpc in modules/vpc
+
+Initializing provider plugins...
+- Reusing previous version of hashicorp/local from the dependency lock file
+- Reusing previous version of hashicorp/aws from the dependency lock file
+- Using previously-installed hashicorp/local v2.4.1
+- Using previously-installed hashicorp/aws v5.31.0
+
+Terraform has been successfully initialized!
+
+You may now begin working with Terraform. Try running "terraform plan" to see
+any changes that are required for your infrastructure. All Terraform commands
+should now work.
+
+If you ever set or change modules or backend configuration for Terraform,
+rerun this command to reinitialize your working directory. If you forget, other
+commands will detect it and remind you to do so if necessary.
+```
+
+E agora vamos simplesmente o plan
+```bash
+❯ terraform plan
+module.new-vpc.data.aws_availability_zones.available: Reading...
+module.new-vpc.data.aws_availability_zones.available: Read complete after 1s [id=us-east-1]
+
+Terraform used the selected providers to generate the following execution plan. Resource actions are indicated
+with the following symbols:
+  + create
+
+Terraform will perform the following actions:
+
+  # module.eks.aws_cloudwatch_log_group.log will be created
+  + resource "aws_cloudwatch_log_group" "log" {
+      + arn               = (known after apply)
+      + id                = (known after apply)
+      + log_group_class   = (known after apply)
+      + name              = "/aws/eks/fullcycle-fc_course/cluster"
+      + name_prefix       = (known after apply)
+      + retention_in_days = 30
+      + skip_destroy      = false
+      + tags_all          = (known after apply)
+    }
+
+  # module.eks.aws_eks_cluster.cluster will be created
+  + resource "aws_eks_cluster" "cluster" {
+      + arn                       = (known after apply)
+      + certificate_authority     = (known after apply)
+      + cluster_id                = (known after apply)
+      + created_at                = (known after apply)
+      + enabled_cluster_log_types = [
+          + "api",
+          + "audit",
+        ]
+      + endpoint                  = (known after apply)
+      + id                        = (known after apply)
+      + identity                  = (known after apply)
+      + name                      = "fullcycle-fc_course"
+      + platform_version          = (known after apply)
+      + role_arn                  = (known after apply)
+      + status                    = (known after apply)
+      + tags_all                  = (known after apply)
+      + version                   = (known after apply)
+
+      + vpc_config {
+          + cluster_security_group_id = (known after apply)
+          + endpoint_private_access   = false
+          + endpoint_public_access    = true
+          + public_access_cidrs       = (known after apply)
+          + security_group_ids        = (known after apply)
+          + subnet_ids                = (known after apply)
+          + vpc_id                    = (known after apply)
+        }
+    }
+
+  # module.eks.aws_eks_node_group.node-1 will be created
+  + resource "aws_eks_node_group" "node-1" {
+      + ami_type               = (known after apply)
+      + arn                    = (known after apply)
+      + capacity_type          = (known after apply)
+      + cluster_name           = "fullcycle-fc_course"
+      + disk_size              = (known after apply)
+      + id                     = (known after apply)
+      + instance_types         = [
+          + "t3.micro",
+        ]
+      + node_group_name        = "node-1"
+      + node_group_name_prefix = (known after apply)
+      + node_role_arn          = (known after apply)
+      + release_version        = (known after apply)
+      + resources              = (known after apply)
+      + status                 = (known after apply)
+      + subnet_ids             = (known after apply)
+      + tags_all               = (known after apply)
+      + version                = (known after apply)
+
+      + scaling_config {
+          + desired_size = 2
+          + max_size     = 4
+          + min_size     = 2
+        }
+    }
+
+  # module.eks.aws_iam_role.cluster will be created
+  + resource "aws_iam_role" "cluster" {
+      + arn                   = (known after apply)
+      + assume_role_policy    = jsonencode(
+            {
+              + Statement = [
+                  + {
+                      + Action    = "sts:AssumeRole"
+                      + Effect    = "Allow"
+                      + Principal = {
+                          + Service = "eks.amazonaws.com"
+                        }
+                    },
+                ]
+              + Version   = "2012-10-17"
+            }
+        )
+      + create_date           = (known after apply)
+      + force_detach_policies = false
+      + id                    = (known after apply)
+      + managed_policy_arns   = (known after apply)
+      + max_session_duration  = 3600
+      + name                  = "fullcycle-fc_course-role"
+      + name_prefix           = (known after apply)
+      + path                  = "/"
+      + tags_all              = (known after apply)
+      + unique_id             = (known after apply)
+    }
+
+  # module.eks.aws_iam_role.node will be created
+  + resource "aws_iam_role" "node" {
+      + arn                   = (known after apply)
+      + assume_role_policy    = jsonencode(
+            {
+              + Statement = [
+                  + {
+                      + Action    = "sts:AssumeRole"
+                      + Effect    = "Allow"
+                      + Principal = {
+                          + Service = "ec2.amazonaws.com"
+                        }
+                    },
+                ]
+              + Version   = "2012-10-17"
+            }
+        )
+      + create_date           = (known after apply)
+      + force_detach_policies = false
+      + id                    = (known after apply)
+      + managed_policy_arns   = (known after apply)
+      + max_session_duration  = 3600
+      + name                  = "fullcycle-fc_course-role-node"
+      + name_prefix           = (known after apply)
+      + path                  = "/"
+      + tags_all              = (known after apply)
+      + unique_id             = (known after apply)
+    }
+
+  # module.eks.aws_iam_role_policy_attachment.cluster-AmazonEKSClusterPolicy will be created
+  + resource "aws_iam_role_policy_attachment" "cluster-AmazonEKSClusterPolicy" {
+      + id         = (known after apply)
+      + policy_arn = "arn:aws:iam::aws:policy/AmazonEKSClusterPolicy"
+      + role       = "fullcycle-fc_course-role"
+    }
+
+  # module.eks.aws_iam_role_policy_attachment.cluster-AmazonEKSVPCResourceController will be created
+  + resource "aws_iam_role_policy_attachment" "cluster-AmazonEKSVPCResourceController" {
+      + id         = (known after apply)
+      + policy_arn = "arn:aws:iam::aws:policy/AmazonEKSVPCResourceController"
+      + role       = "fullcycle-fc_course-role"
+    }
+
+  # module.eks.aws_iam_role_policy_attachment.node-AmazonEC2ContainerRegistryReadOnly will be created
+  + resource "aws_iam_role_policy_attachment" "node-AmazonEC2ContainerRegistryReadOnly" {
+      + id         = (known after apply)
+      + policy_arn = "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly"
+      + role       = "fullcycle-fc_course-role-node"
+    }
+
+  # module.eks.aws_iam_role_policy_attachment.node-AmazonEKSWorkerNodePolicy will be created
+  + resource "aws_iam_role_policy_attachment" "node-AmazonEKSWorkerNodePolicy" {
+      + id         = (known after apply)
+      + policy_arn = "arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy"
+      + role       = "fullcycle-fc_course-role-node"
+    }
+
+  # module.eks.aws_iam_role_policy_attachment.node-AmazonEKS_CNI_Policy will be created
+  + resource "aws_iam_role_policy_attachment" "node-AmazonEKS_CNI_Policy" {
+      + id         = (known after apply)
+      + policy_arn = "arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy"
+      + role       = "fullcycle-fc_course-role-node"
+    }
+
+  # module.eks.aws_security_group.sg will be created
+  + resource "aws_security_group" "sg" {
+      + arn                    = (known after apply)
+      + description            = "Managed by Terraform"
+      + egress                 = [
+          + {
+              + cidr_blocks      = [
+                  + "0.0.0.0/0",
+                ]
+              + description      = ""
+              + from_port        = 0
+              + ipv6_cidr_blocks = []
+              + prefix_list_ids  = []
+              + protocol         = "-1"
+              + security_groups  = []
+              + self             = false
+              + to_port          = 0
+            },
+        ]
+      + id                     = (known after apply)
+      + ingress                = (known after apply)
+      + name                   = (known after apply)
+      + name_prefix            = (known after apply)
+      + owner_id               = (known after apply)
+      + revoke_rules_on_delete = false
+      + tags                   = {
+          + "Name" = "fullcycle-sg"
+        }
+      + tags_all               = {
+          + "Name" = "fullcycle-sg"
+        }
+      + vpc_id                 = (known after apply)
+    }
+
+  # module.eks.local_file.kubeconfig will be created
+  + resource "local_file" "kubeconfig" {
+      + content              = (known after apply)
+      + content_base64sha256 = (known after apply)
+      + content_base64sha512 = (known after apply)
+      + content_md5          = (known after apply)
+      + content_sha1         = (known after apply)
+      + content_sha256       = (known after apply)
+      + content_sha512       = (known after apply)
+      + directory_permission = "0777"
+      + file_permission      = "0777"
+      + filename             = "kubeconfig"
+      + id                   = (known after apply)
+    }
+
+  # module.new-vpc.aws_internet_gateway.new-igw will be created
+  + resource "aws_internet_gateway" "new-igw" {
+      + arn      = (known after apply)
+      + id       = (known after apply)
+      + owner_id = (known after apply)
+      + tags     = {
+          + "Name" = "fullcycle-igw"
+        }
+      + tags_all = {
+          + "Name" = "fullcycle-igw"
+        }
+      + vpc_id   = (known after apply)
+    }
+
+  # module.new-vpc.aws_route_table.new-rtb will be created
+  + resource "aws_route_table" "new-rtb" {
+      + arn              = (known after apply)
+      + id               = (known after apply)
+      + owner_id         = (known after apply)
+      + propagating_vgws = (known after apply)
+      + route            = [
+          + {
+              + carrier_gateway_id         = ""
+              + cidr_block                 = "0.0.0.0/0"
+              + core_network_arn           = ""
+              + destination_prefix_list_id = ""
+              + egress_only_gateway_id     = ""
+              + gateway_id                 = (known after apply)
+              + ipv6_cidr_block            = ""
+              + local_gateway_id           = ""
+              + nat_gateway_id             = ""
+              + network_interface_id       = ""
+              + transit_gateway_id         = ""
+              + vpc_endpoint_id            = ""
+              + vpc_peering_connection_id  = ""
+            },
+        ]
+      + tags             = {
+          + "Name" = "fullcycle-rtb"
+        }
+      + tags_all         = {
+          + "Name" = "fullcycle-rtb"
+        }
+      + vpc_id           = (known after apply)
+    }
+
+  # module.new-vpc.aws_route_table_association.new-rtb-association[0] will be created
+  + resource "aws_route_table_association" "new-rtb-association" {
+      + id             = (known after apply)
+      + route_table_id = (known after apply)
+      + subnet_id      = (known after apply)
+    }
+
+  # module.new-vpc.aws_route_table_association.new-rtb-association[1] will be created
+  + resource "aws_route_table_association" "new-rtb-association" {
+      + id             = (known after apply)
+      + route_table_id = (known after apply)
+      + subnet_id      = (known after apply)
+    }
+
+  # module.new-vpc.aws_subnet.subnets[0] will be created
+  + resource "aws_subnet" "subnets" {
+      + arn                                            = (known after apply)
+      + assign_ipv6_address_on_creation                = false
+      + availability_zone                              = "us-east-1a"
+      + availability_zone_id                           = (known after apply)
+      + cidr_block                                     = "10.0.0.0/24"
+      + enable_dns64                                   = false
+      + enable_resource_name_dns_a_record_on_launch    = false
+      + enable_resource_name_dns_aaaa_record_on_launch = false
+      + id                                             = (known after apply)
+      + ipv6_cidr_block_association_id                 = (known after apply)
+      + ipv6_native                                    = false
+      + map_public_ip_on_launch                        = true
+      + owner_id                                       = (known after apply)
+      + private_dns_hostname_type_on_launch            = (known after apply)
+      + tags                                           = {
+          + "Name" = "fullcycle-subnet-0"
+        }
+      + tags_all                                       = {
+          + "Name" = "fullcycle-subnet-0"
+        }
+      + vpc_id                                         = (known after apply)
+    }
+
+  # module.new-vpc.aws_subnet.subnets[1] will be created
+  + resource "aws_subnet" "subnets" {
+      + arn                                            = (known after apply)
+      + assign_ipv6_address_on_creation                = false
+      + availability_zone                              = "us-east-1b"
+      + availability_zone_id                           = (known after apply)
+      + cidr_block                                     = "10.0.1.0/24"
+      + enable_dns64                                   = false
+      + enable_resource_name_dns_a_record_on_launch    = false
+      + enable_resource_name_dns_aaaa_record_on_launch = false
+      + id                                             = (known after apply)
+      + ipv6_cidr_block_association_id                 = (known after apply)
+      + ipv6_native                                    = false
+      + map_public_ip_on_launch                        = true
+      + owner_id                                       = (known after apply)
+      + private_dns_hostname_type_on_launch            = (known after apply)
+      + tags                                           = {
+          + "Name" = "fullcycle-subnet-1"
+        }
+      + tags_all                                       = {
+          + "Name" = "fullcycle-subnet-1"
+        }
+      + vpc_id                                         = (known after apply)
+    }
+
+  # module.new-vpc.aws_vpc.new-vpc will be created
+  + resource "aws_vpc" "new-vpc" {
+      + arn                                  = (known after apply)
+      + cidr_block                           = "10.0.0.0/16"
+      + default_network_acl_id               = (known after apply)
+      + default_route_table_id               = (known after apply)
+      + default_security_group_id            = (known after apply)
+      + dhcp_options_id                      = (known after apply)
+      + enable_dns_hostnames                 = (known after apply)
+      + enable_dns_support                   = true
+      + enable_network_address_usage_metrics = (known after apply)
+      + id                                   = (known after apply)
+      + instance_tenancy                     = "default"
+      + ipv6_association_id                  = (known after apply)
+      + ipv6_cidr_block                      = (known after apply)
+      + ipv6_cidr_block_network_border_group = (known after apply)
+      + main_route_table_id                  = (known after apply)
+      + owner_id                             = (known after apply)
+      + tags                                 = {
+          + "Name" = "fullcycle-vpc"
+        }
+      + tags_all                             = {
+          + "Name" = "fullcycle-vpc"
+        }
+    }
+
+Plan: 19 to add, 0 to change, 0 to destroy.
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+Note: You didn't use the -out option to save this plan, so Terraform can't guarantee to take exactly these actions
+if you run "terraform apply" now.
+```
+
+Aparentemente, está tudo ok sem erros.
+```bash
+❯ terraform apply --auto-approve                                                               
+module.new-vpc.data.aws_availability_zones.available: Reading...
+module.new-vpc.data.aws_availability_zones.available: Read complete after 0s [id=us-east-1]
+
+Terraform used the selected providers to generate the following execution plan. Resource actions are indicated
+with the following symbols:
+  + create
+
+Terraform will perform the following actions:
+
+  # module.eks.aws_cloudwatch_log_group.log will be created
+  + resource "aws_cloudwatch_log_group" "log" {
+      + arn               = (known after apply)
+      + id                = (known after apply)
+      + log_group_class   = (known after apply)
+      + name              = "/aws/eks/fullcycle-fc_course/cluster"
+      + name_prefix       = (known after apply)
+      + retention_in_days = 30
+      + skip_destroy      = false
+      + tags_all          = (known after apply)
+    }
+
+  # module.eks.aws_eks_cluster.cluster will be created
+  + resource "aws_eks_cluster" "cluster" {
+      + arn                       = (known after apply)
+      + certificate_authority     = (known after apply)
+      + cluster_id                = (known after apply)
+      + created_at                = (known after apply)
+      + enabled_cluster_log_types = [
+          + "api",
+          + "audit",
+        ]
+      + endpoint                  = (known after apply)
+      + id                        = (known after apply)
+      + identity                  = (known after apply)
+      + name                      = "fullcycle-fc_course"
+      + platform_version          = (known after apply)
+      + role_arn                  = (known after apply)
+      + status                    = (known after apply)
+      + tags_all                  = (known after apply)
+      + version                   = (known after apply)
+
+      + vpc_config {
+          + cluster_security_group_id = (known after apply)
+          + endpoint_private_access   = false
+          + endpoint_public_access    = true
+          + public_access_cidrs       = (known after apply)
+          + security_group_ids        = (known after apply)
+          + subnet_ids                = (known after apply)
+          + vpc_id                    = (known after apply)
+        }
+    }
+
+  # module.eks.aws_eks_node_group.node-1 will be created
+  + resource "aws_eks_node_group" "node-1" {
+      + ami_type               = (known after apply)
+      + arn                    = (known after apply)
+      + capacity_type          = (known after apply)
+      + cluster_name           = "fullcycle-fc_course"
+      + disk_size              = (known after apply)
+      + id                     = (known after apply)
+      + instance_types         = [
+          + "t3.micro",
+        ]
+      + node_group_name        = "node-1"
+      + node_group_name_prefix = (known after apply)
+      + node_role_arn          = (known after apply)
+      + release_version        = (known after apply)
+      + resources              = (known after apply)
+      + status                 = (known after apply)
+      + subnet_ids             = (known after apply)
+      + tags_all               = (known after apply)
+      + version                = (known after apply)
+
+      + scaling_config {
+          + desired_size = 2
+          + max_size     = 4
+          + min_size     = 2
+        }
+    }
+
+  # module.eks.aws_iam_role.cluster will be created
+  + resource "aws_iam_role" "cluster" {
+      + arn                   = (known after apply)
+      + assume_role_policy    = jsonencode(
+            {
+              + Statement = [
+                  + {
+                      + Action    = "sts:AssumeRole"
+                      + Effect    = "Allow"
+                      + Principal = {
+                          + Service = "eks.amazonaws.com"
+                        }
+                    },
+                ]
+              + Version   = "2012-10-17"
+            }
+        )
+      + create_date           = (known after apply)
+      + force_detach_policies = false
+      + id                    = (known after apply)
+      + managed_policy_arns   = (known after apply)
+      + max_session_duration  = 3600
+      + name                  = "fullcycle-fc_course-role"
+      + name_prefix           = (known after apply)
+      + path                  = "/"
+      + tags_all              = (known after apply)
+      + unique_id             = (known after apply)
+    }
+
+  # module.eks.aws_iam_role.node will be created
+  + resource "aws_iam_role" "node" {
+      + arn                   = (known after apply)
+      + assume_role_policy    = jsonencode(
+            {
+              + Statement = [
+                  + {
+                      + Action    = "sts:AssumeRole"
+                      + Effect    = "Allow"
+                      + Principal = {
+                          + Service = "ec2.amazonaws.com"
+                        }
+                    },
+                ]
+              + Version   = "2012-10-17"
+            }
+        )
+      + create_date           = (known after apply)
+      + force_detach_policies = false
+      + id                    = (known after apply)
+      + managed_policy_arns   = (known after apply)
+      + max_session_duration  = 3600
+      + name                  = "fullcycle-fc_course-role-node"
+      + name_prefix           = (known after apply)
+      + path                  = "/"
+      + tags_all              = (known after apply)
+      + unique_id             = (known after apply)
+    }
+
+  # module.eks.aws_iam_role_policy_attachment.cluster-AmazonEKSClusterPolicy will be created
+  + resource "aws_iam_role_policy_attachment" "cluster-AmazonEKSClusterPolicy" {
+      + id         = (known after apply)
+      + policy_arn = "arn:aws:iam::aws:policy/AmazonEKSClusterPolicy"
+      + role       = "fullcycle-fc_course-role"
+    }
+
+  # module.eks.aws_iam_role_policy_attachment.cluster-AmazonEKSVPCResourceController will be created
+  + resource "aws_iam_role_policy_attachment" "cluster-AmazonEKSVPCResourceController" {
+      + id         = (known after apply)
+      + policy_arn = "arn:aws:iam::aws:policy/AmazonEKSVPCResourceController"
+      + role       = "fullcycle-fc_course-role"
+    }
+
+  # module.eks.aws_iam_role_policy_attachment.node-AmazonEC2ContainerRegistryReadOnly will be created
+  + resource "aws_iam_role_policy_attachment" "node-AmazonEC2ContainerRegistryReadOnly" {
+      + id         = (known after apply)
+      + policy_arn = "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly"
+      + role       = "fullcycle-fc_course-role-node"
+    }
+
+  # module.eks.aws_iam_role_policy_attachment.node-AmazonEKSWorkerNodePolicy will be created
+  + resource "aws_iam_role_policy_attachment" "node-AmazonEKSWorkerNodePolicy" {
+      + id         = (known after apply)
+      + policy_arn = "arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy"
+      + role       = "fullcycle-fc_course-role-node"
+    }
+
+  # module.eks.aws_iam_role_policy_attachment.node-AmazonEKS_CNI_Policy will be created
+  + resource "aws_iam_role_policy_attachment" "node-AmazonEKS_CNI_Policy" {
+      + id         = (known after apply)
+      + policy_arn = "arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy"
+      + role       = "fullcycle-fc_course-role-node"
+    }
+
+  # module.eks.aws_security_group.sg will be created
+  + resource "aws_security_group" "sg" {
+      + arn                    = (known after apply)
+      + description            = "Managed by Terraform"
+      + egress                 = [
+          + {
+              + cidr_blocks      = [
+                  + "0.0.0.0/0",
+                ]
+              + description      = ""
+              + from_port        = 0
+              + ipv6_cidr_blocks = []
+              + prefix_list_ids  = []
+              + protocol         = "-1"
+              + security_groups  = []
+              + self             = false
+              + to_port          = 0
+            },
+        ]
+      + id                     = (known after apply)
+      + ingress                = (known after apply)
+      + name                   = (known after apply)
+      + name_prefix            = (known after apply)
+      + owner_id               = (known after apply)
+      + revoke_rules_on_delete = false
+      + tags                   = {
+          + "Name" = "fullcycle-sg"
+        }
+      + tags_all               = {
+          + "Name" = "fullcycle-sg"
+        }
+      + vpc_id                 = (known after apply)
+    }
+
+  # module.eks.local_file.kubeconfig will be created
+  + resource "local_file" "kubeconfig" {
+      + content              = (known after apply)
+      + content_base64sha256 = (known after apply)
+      + content_base64sha512 = (known after apply)
+      + content_md5          = (known after apply)
+      + content_sha1         = (known after apply)
+      + content_sha256       = (known after apply)
+      + content_sha512       = (known after apply)
+      + directory_permission = "0777"
+      + file_permission      = "0777"
+      + filename             = "kubeconfig"
+      + id                   = (known after apply)
+    }
+
+  # module.new-vpc.aws_internet_gateway.new-igw will be created
+  + resource "aws_internet_gateway" "new-igw" {
+      + arn      = (known after apply)
+      + id       = (known after apply)
+      + owner_id = (known after apply)
+      + tags     = {
+          + "Name" = "fullcycle-igw"
+        }
+      + tags_all = {
+          + "Name" = "fullcycle-igw"
+        }
+      + vpc_id   = (known after apply)
+    }
+
+  # module.new-vpc.aws_route_table.new-rtb will be created
+  + resource "aws_route_table" "new-rtb" {
+      + arn              = (known after apply)
+      + id               = (known after apply)
+      + owner_id         = (known after apply)
+      + propagating_vgws = (known after apply)
+      + route            = [
+          + {
+              + carrier_gateway_id         = ""
+              + cidr_block                 = "0.0.0.0/0"
+              + core_network_arn           = ""
+              + destination_prefix_list_id = ""
+              + egress_only_gateway_id     = ""
+              + gateway_id                 = (known after apply)
+              + ipv6_cidr_block            = ""
+              + local_gateway_id           = ""
+              + nat_gateway_id             = ""
+              + network_interface_id       = ""
+              + transit_gateway_id         = ""
+              + vpc_endpoint_id            = ""
+              + vpc_peering_connection_id  = ""
+            },
+        ]
+      + tags             = {
+          + "Name" = "fullcycle-rtb"
+        }
+      + tags_all         = {
+          + "Name" = "fullcycle-rtb"
+        }
+      + vpc_id           = (known after apply)
+    }
+
+  # module.new-vpc.aws_route_table_association.new-rtb-association[0] will be created
+  + resource "aws_route_table_association" "new-rtb-association" {
+      + id             = (known after apply)
+      + route_table_id = (known after apply)
+      + subnet_id      = (known after apply)
+    }
+
+  # module.new-vpc.aws_route_table_association.new-rtb-association[1] will be created
+  + resource "aws_route_table_association" "new-rtb-association" {
+      + id             = (known after apply)
+      + route_table_id = (known after apply)
+      + subnet_id      = (known after apply)
+    }
+
+  # module.new-vpc.aws_subnet.subnets[0] will be created
+  + resource "aws_subnet" "subnets" {
+      + arn                                            = (known after apply)
+      + assign_ipv6_address_on_creation                = false
+      + availability_zone                              = "us-east-1a"
+      + availability_zone_id                           = (known after apply)
+      + cidr_block                                     = "10.0.0.0/24"
+      + enable_dns64                                   = false
+      + enable_resource_name_dns_a_record_on_launch    = false
+      + enable_resource_name_dns_aaaa_record_on_launch = false
+      + id                                             = (known after apply)
+      + ipv6_cidr_block_association_id                 = (known after apply)
+      + ipv6_native                                    = false
+      + map_public_ip_on_launch                        = true
+      + owner_id                                       = (known after apply)
+      + private_dns_hostname_type_on_launch            = (known after apply)
+      + tags                                           = {
+          + "Name" = "fullcycle-subnet-0"
+        }
+      + tags_all                                       = {
+          + "Name" = "fullcycle-subnet-0"
+        }
+      + vpc_id                                         = (known after apply)
+    }
+
+  # module.new-vpc.aws_subnet.subnets[1] will be created
+  + resource "aws_subnet" "subnets" {
+      + arn                                            = (known after apply)
+      + assign_ipv6_address_on_creation                = false
+      + availability_zone                              = "us-east-1b"
+      + availability_zone_id                           = (known after apply)
+      + cidr_block                                     = "10.0.1.0/24"
+      + enable_dns64                                   = false
+      + enable_resource_name_dns_a_record_on_launch    = false
+      + enable_resource_name_dns_aaaa_record_on_launch = false
+      + id                                             = (known after apply)
+      + ipv6_cidr_block_association_id                 = (known after apply)
+      + ipv6_native                                    = false
+      + map_public_ip_on_launch                        = true
+      + owner_id                                       = (known after apply)
+      + private_dns_hostname_type_on_launch            = (known after apply)
+      + tags                                           = {
+          + "Name" = "fullcycle-subnet-1"
+        }
+      + tags_all                                       = {
+          + "Name" = "fullcycle-subnet-1"
+        }
+      + vpc_id                                         = (known after apply)
+    }
+
+  # module.new-vpc.aws_vpc.new-vpc will be created
+  + resource "aws_vpc" "new-vpc" {
+      + arn                                  = (known after apply)
+      + cidr_block                           = "10.0.0.0/16"
+      + default_network_acl_id               = (known after apply)
+      + default_route_table_id               = (known after apply)
+      + default_security_group_id            = (known after apply)
+      + dhcp_options_id                      = (known after apply)
+      + enable_dns_hostnames                 = (known after apply)
+      + enable_dns_support                   = true
+      + enable_network_address_usage_metrics = (known after apply)
+      + id                                   = (known after apply)
+      + instance_tenancy                     = "default"
+      + ipv6_association_id                  = (known after apply)
+      + ipv6_cidr_block                      = (known after apply)
+      + ipv6_cidr_block_network_border_group = (known after apply)
+      + main_route_table_id                  = (known after apply)
+      + owner_id                             = (known after apply)
+      + tags                                 = {
+          + "Name" = "fullcycle-vpc"
+        }
+      + tags_all                             = {
+          + "Name" = "fullcycle-vpc"
+        }
+    }
+
+Plan: 19 to add, 0 to change, 0 to destroy.
+module.eks.aws_cloudwatch_log_group.log: Creating...
+module.new-vpc.aws_vpc.new-vpc: Creating...
+module.eks.aws_iam_role.cluster: Creating...
+module.eks.aws_iam_role.node: Creating...
+module.eks.aws_cloudwatch_log_group.log: Creation complete after 1s [id=/aws/eks/fullcycle-fc_course/cluster]
+module.eks.aws_iam_role.node: Creation complete after 1s [id=fullcycle-fc_course-role-node]
+module.eks.aws_iam_role.cluster: Creation complete after 1s [id=fullcycle-fc_course-role]
+module.eks.aws_iam_role_policy_attachment.cluster-AmazonEKSClusterPolicy: Creating...
+module.eks.aws_iam_role_policy_attachment.cluster-AmazonEKSVPCResourceController: Creating...
+module.eks.aws_iam_role_policy_attachment.node-AmazonEKS_CNI_Policy: Creating...
+module.eks.aws_iam_role_policy_attachment.node-AmazonEC2ContainerRegistryReadOnly: Creating...
+module.eks.aws_iam_role_policy_attachment.node-AmazonEKSWorkerNodePolicy: Creating...
+module.eks.aws_iam_role_policy_attachment.cluster-AmazonEKSVPCResourceController: Creation complete after 1s [id=fullcycle-fc_course-role-20240104201201646100000001]
+module.eks.aws_iam_role_policy_attachment.cluster-AmazonEKSClusterPolicy: Creation complete after 1s [id=fullcycle-fc_course-role-20240104201201656200000002]
+module.eks.aws_iam_role_policy_attachment.node-AmazonEC2ContainerRegistryReadOnly: Creation complete after 1s [id=fullcycle-fc_course-role-node-20240104201201890500000003]
+module.eks.aws_iam_role_policy_attachment.node-AmazonEKS_CNI_Policy: Creation complete after 1s [id=fullcycle-fc_course-role-node-20240104201201973100000004]
+module.eks.aws_iam_role_policy_attachment.node-AmazonEKSWorkerNodePolicy: Creation complete after 1s [id=fullcycle-fc_course-role-node-20240104201202050800000005]
+module.new-vpc.aws_vpc.new-vpc: Creation complete after 3s [id=vpc-0d537a62cc35d2809]
+module.new-vpc.aws_internet_gateway.new-igw: Creating...
+module.new-vpc.aws_subnet.subnets[1]: Creating...
+module.new-vpc.aws_subnet.subnets[0]: Creating...
+module.eks.aws_security_group.sg: Creating...
+
+Apply complete! Resources: 19 added, 0 changed, 0 destroyed.
+```
+
+
+Uma vez criados os dois modulos, basta apenas dois comandos para realizar tudo isso!
+
+Como publicamos um modulo no terraform?
+
+No site do terraform tem um lugar para publiocar o modulo e publicar com o github em um repositorio publico o nome do repositori teria que estar com terraform-PROVIDER-NAME
+
+Automaticamente ele vai gerar a doc e qualquer pessoa vai poder usar os nossos modulos do terraform!
+
+Se der um erro de log group, no momento em que o terraform estava dando o destroy, deu algum problema e entao ele estava tentando criar algo que ja exixtia. Se isso acontecer, eh bom que seja novamente tudo destruido para começar do zero.
+
+## Vendo o Resultado final
+Após o comando de criaçao finalizado, basta ir no console eks e verificar!
+
+Quando trabalhamos com modulos no terraform, as coisas começam a ser facilitadas pois os modulos diminuem a quantidade de codigo!
+
+Sempre vai no registry com os modulos oficiais para sairmos utilizando!
 
 
 
+# Backend Remoto
+## Falando sobre o tfstate
+Primeiramente copie o providers.tf para o main e dele o providers
+```tf
+terraform {
+  required_version = ">=0.13.1"
+  required_providers {
+    aws = ">=3.54.0"
+    local = ">=2.1.0"
+  }
+}
+
+provider "aws" {
+  region = "us-east-1"
+}
+
+module "new-vpc" {
+  source = "./modules/vpc"
+  prefix = var.prefix
+  vpc_cidr_block = var.vpc_cidr_block
+}
+
+module "eks" {
+  source = "./modules/eks"
+  prefix = var.prefix
+  vpc_id = module.new-vpc.vpc_id
+  cluster_name = var.cluster_name
+  retention_days = var.retention_days
+  subnet_ids = module.new-vpc.subnet_ids
+  desired_size = var.desired_size
+  max_size = var.max_size
+  min_size = var.min_size
+}
+```
+Quando trabalhamos com o terraform, tudo o que fizemos e eh executado, ele vai gerar o terraform.tfstate com todos os detalhes de tudo do cluster!
+
+Se formos fazer alteraçoes manualmente, eh muito recomendado que JAMAIS SE MEXA NA AWS quando se usa o terraform!
+
+E se mais de uma pessoa alterar os arquivos e gerar outro tfstate?
+
+Vamos garantir que o tfstate nao seja perdido nem tenha conflito com as alteraçoes de um outro colega de trabalho
+
+
+## Jogando o tfstate no S3
+O S3 eh um lugar bem seguro para guardar na aws.
+
+Em main:
+```tf
+terraform {
+  required_version = ">=0.13.1"
+  required_providers {
+    aws = ">=3.54.0"
+    local = ">=2.1.0"
+  }
+  backend "s3" {
+    bucket = "myfcbucket-tf"
+    key = "terraform.tfstate"
+    region = "us-east-1"
+  }
+}
+
+provider "aws" {
+  region = "us-east-1"
+}
+
+module "new-vpc" {
+  source = "./modules/vpc"
+  prefix = var.prefix
+  vpc_cidr_block = var.vpc_cidr_block
+}
+
+module "eks" {
+  source = "./modules/eks"
+  prefix = var.prefix
+  vpc_id = module.new-vpc.vpc_id
+  cluster_name = var.cluster_name
+  retention_days = var.retention_days
+  subnet_ids = module.new-vpc.subnet_ids
+  desired_size = var.desired_size
+  max_size = var.max_size
+  min_size = var.min_size
+}
+```
+
+Dessa maneira, ele bai jogar tudo do tfstate no S3!
+
+Vamos em Console na aws -> S3 -> Create nEW bUCKET -> ACL Bloqueada e todo o acesso bloqueado tb.
+
+Vamos versionar o tfstate com active e criar o bucket
+E foi criado!
+
+myfcbucket-tf	Leste dos EUA (Norte da Virgínia) us-east-1	Bucket e objetos não públicos	4 Jan 2024 05:33:47 PM -03
+
+Vamos dar um terraform init apenas paa ele inicializar o backend:
+```bash
+❯ terraform init
+
+Initializing the backend...
+Initializing modules...
+
+Initializing provider plugins...
+- Reusing previous version of hashicorp/local from the dependency lock file
+- Reusing previous version of hashicorp/aws from the dependency lock file
+- Using previously-installed hashicorp/local v2.4.1
+- Using previously-installed hashicorp/aws v5.31.0
+
+Terraform has been successfully initialized!
+
+You may now begin working with Terraform. Try running "terraform plan" to see
+any changes that are required for your infrastructure. All Terraform commands
+should now work.
+
+If you ever set or change modules or backend configuration for Terraform,
+rerun this command to reinitialize your working directory. If you forget, other
+commands will detect it and remind you to do so if necessary.
+```
+
+Agora, vamos em console -> s3 -> 
+terraform.tfstate	tfstate	4 Jan 2024 05:35:41 PM -03	30.5 KB Padrão
+
+E foi!
+
+sE ABRIRMOS O TERRAFORM.TFSATE LOCAL, VEMOS QUE ELE ESTA VAZIO! vAMOS APAGAR O TFSTATE E O BACKUP
+
+
+## Palavras Finais
+O grande ponto eh que o terraform nao eh dificil, mas entender quais resources e clouds e como utilizar, geralmente os oficiais.
+
+Vamos destruir o cluster para nao gerar mais dividas
+```bash
+terraform destroy
+```
 
 
