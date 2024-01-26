@@ -1,0 +1,14 @@
+FROM golang:1.20-buster
+
+WORKDIR /go/src
+ENV PATH="/go/bin:${PATH}"
+
+RUN apt-get update && \
+    apt-get install build-essential software-properties-common -y
+    
+# RUN wget -qO - https://packages.confluent.io/deb/7.5/archive.key | apt-key add -  && \
+#     add-apt-repository "deb [arch=$(arch)] https://packages.confluent.io/deb/7.5 stable main" && \
+#     apt-get update && \
+#     apt-get install librdkafka-dev -y
+
+CMD ["tail", "-f", "/dev/null"]

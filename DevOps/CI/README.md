@@ -654,7 +654,7 @@ secrets.DOCKERHUB_USERNAME e DOCKERHUB_TOKEN
 
 COmo conseguimos esse dockerhub token?
 
-Vamos logar no dockerhub, settings, security, New access Tokens.
+Vamos logar no dockerhub, my account, settings, security, New access Tokens.
 
 Vamos copiar entao o token do docker hub e copiar para a a secret do Github!
 
