@@ -1888,6 +1888,868 @@ Sobre o nginx, se instalarmos dentro da propria maquina, eh possivel deseinstala
 
 # Trabalhando com Playbooks
 
+## Criando mãquinas na AWS
+
+Vamos criar o nosso ambiente na aws, rodar a partir de uma maquina e criando todo o ambiente
+
+Vamos acessar a conta da aws via client id e acessar o EC2. Sao maquinas virtuais apra conseguirmos rodar e criar as nossas maquinas.
+
+Vamos criar 3 maquinas para fazer esse processo. 
+Launch INstances -> Ubuntu AMD64 -> t2.micro -> Number of instances: 3 -> Review and Launch -> SSH ok -> Launch
+
+Na hora que trabalhamos com a AWS nao trabalhamos com senhas, mas com chaves provadas que nos permite ter acesso as maquinas. COmo se fosse um ssh-keygen -> Create New Key Pair -> Launch.
+
+E quando a maquina começar a rodar ela vai aparececer no console!
+
+As maquinas foram criadas com sucesso!
+Screenshot from 2024-02-14 19-19-50.png
+
+A seguir vamos fazer um teste da key-pair usando o ansible e começar a usar os usuários ubuntu -> root!
+
+## Pingando as máquinas na AWS
+Vamos rodar o comando do ansible localmente no pc e fazer com que as ec2 recebam os comandos do ansible do nosso pc
+
+Vamos criar um diretorio ansible-aws e dentro dele o arquivo hosts que vai receber os IPs que desejamos trabalhar. Para isso, basta clicar em cada maquina e verificar os detalhes de cada uma no campo do IP
+
+```hosts
+18.117.78.52
+3.144.93.48
+3.138.126.106
+```
+
+E vamos testar o bash
+```bash
+cd ansible-aws
+❯ ansible -i hosts all -m ping
+The authenticity of host '18.117.78.52 (18.117.78.52)' can't be established.
+ED25519 key fingerprint is SHA256:eKdQVAzB6sZR7LqXIrafEhoVmmnymx2AgB9fZvHvNIE.
+This key is not known by any other names
+Are you sure you want to continue connecting (yes/no/[fingerprint])? The authenticity of host '3.138.126.106 (3.138.126.106)' can't be established.
+ED25519 key fingerprint is SHA256:EH1qVb+smbGRvM+JvQREcFm3UUpQQvPQhornB88GC7Y.
+This key is not known by any other names
+The authenticity of host '3.144.93.48 (3.144.93.48)' can't be established.
+ED25519 key fingerprint is SHA256:ww7lr3p/CXIbjrdnL9kAt9QEejygBUSICXry+lyuYFE.
+This key is not known by any other names
+Are you sure you want to continue connecting (yes/no/[fingerprint])? yes
+3.138.126.106 | UNREACHABLE! => {
+    "changed": false,
+    "msg": "Failed to connect to the host via ssh: Host key verification failed.",
+    "unreachable": true
+}
+
+18.117.78.52 | UNREACHABLE! => {
+    "changed": false,
+    "msg": "Failed to connect to the host via ssh: Warning: Permanently added '18.117.78.52' (ED25519) to the list of known hosts.\r\nrogerio@18.117.78.52: Permission denied (publickey).",
+    "unreachable": true
+}
+
+3.144.93.48 | UNREACHABLE! => {
+    "changed": false,
+    "msg": "Failed to connect to the host via ssh: Host key verification failed.",
+    "unreachable": true
+}
+```
+
+Deu erro! A primeira coisa que precisamos fazer, é dar uma permissao nas chaves que baixamos de key-pair para dar uma permissao de leitura do nosso usuario para garantir a segurança
+
+```bash
+chmod 400 aws-ansible.pem 
+```
+
+AGora, precisamos fazer com que o ansible use essa chave ao fazer o login em hosts
+```hosts
+18.117.78.52
+3.144.93.48
+3.138.126.106
+
+[all:vars]
+ansible_ssh_private_key_file=/home/rogerio/Git/SmartCampusMaua/Docs/DevOps/Ansible/ansible-aws/aws-ansible.pem
+```
+
+Vamos rodar novamente o comando
+```bash
+❯ ansible -i hosts all -m ping
+The authenticity of host '3.144.93.48 (3.144.93.48)' can't be established.
+ED25519 key fingerprint is SHA256:ww7lr3p/CXIbjrdnL9kAt9QEejygBUSICXry+lyuYFE.
+This key is not known by any other names
+The authenticity of host '3.138.126.106 (3.138.126.106)' can't be established.
+ED25519 key fingerprint is SHA256:EH1qVb+smbGRvM+JvQREcFm3UUpQQvPQhornB88GC7Y.
+This key is not known by any other names
+Are you sure you want to continue connecting (yes/no/[fingerprint])? 18.117.78.52 | UNREACHABLE! => {
+    "changed": false,
+    "msg": "Failed to connect to the host via ssh: rogerio@18.117.78.52: Permission denied (publickey).",
+    "unreachable": true
+}
+yes
+Please type 'yes', 'no' or the fingerprint: yes
+Please type 'yes', 'no' or the fingerprint: yes
+Please type 'yes', 'no' or the fingerprint: yes
+3.138.126.106 | UNREACHABLE! => {
+    "changed": false,
+    "msg": "Failed to connect to the host via ssh: Warning: Permanently added '3.138.126.106' (ED25519) to the list of known hosts.\r\nrogerio@3.138.126.106: Permission denied (publickey).",
+    "unreachable": true
+}
+
+3.144.93.48 | UNREACHABLE! => {
+    "changed": false,
+    "msg": "Failed to connect to the host via ssh: Host key verification failed.",
+    "unreachable": true
+}
+```
+
+Veja que estamos tentando acessar com o usuario da nossa propria maquina local. Vamos acertar isso em hosts:
+```hosts
+18.117.78.52
+3.144.93.48
+3.138.126.106
+
+[all:vars]
+ansible_ssh_private_key_file=/home/rogerio/Git/SmartCampusMaua/Docs/DevOps/Ansible/ansible-aws/aws-ansible.pem
+ansible_user=ubuntu
+```
+
+E executar novamente o comando do ansible
+```bash
+❯ ansible -i hosts all -m ping
+The authenticity of host '3.144.93.48 (3.144.93.48)' can't be established.
+ED25519 key fingerprint is SHA256:ww7lr3p/CXIbjrdnL9kAt9QEejygBUSICXry+lyuYFE.
+This key is not known by any other names
+Are you sure you want to continue connecting (yes/no/[fingerprint])? yes
+3.138.126.106 | SUCCESS => {
+    "ansible_facts": {
+        "discovered_interpreter_python": "/usr/bin/python3"
+    },
+    "changed": false,
+    "ping": "pong"
+}
+18.117.78.52 | SUCCESS => {
+    "ansible_facts": {
+        "discovered_interpreter_python": "/usr/bin/python3"
+    },
+    "changed": false,
+    "ping": "pong"
+}
+3.144.93.48 | SUCCESS => {
+    "ansible_facts": {
+        "discovered_interpreter_python": "/usr/bin/python3"
+    },
+    "changed": false,
+    "ping": "pong"
+}
+```
+
+E foi! Consegumos dar o ping e o pong nas 3 maquinas que subimos na aws. Estamos usando e configurando as chaves que a aws gerou e sermos capaz de rodar o ansible nas maquinas da propria AWS.
+
+## Iniciando com playbooks
+Quando estamos rodando o comando ansible como anteriormente, estamos rodando o ansible de uma forma mais crua (ad-hoc). Isso faz executarmos umcomando em multiplos servidores. Entretanto o nosso desejo nao é executar um comando, mas diversos comandos em um servidor através de um playbook.
+
+Um playbook é uma lista com comandos apos comandos que ele tem que executar na determinada ordem para que tudo funciona conforme queremos. Instalar docker,nginx, k8s ambiente etc.
+
+Vamos criar um arquivo playbook.yaml
+
+`---` é um limitador para arquivos yaml
+```yaml
+---
+- hosts: all
+  remote_user: ubuntu
+  become: true
+
+  tasks:
+    - name: Install nginx
+      apt:
+        name: nginx
+        state: present
+```
+
+E vamos executar o comando para o playbook:
+```bash
+❯ ansible-playbook playbook.yaml 
+[WARNING]: No inventory was parsed, only implicit localhost is available
+[WARNING]: provided hosts list is empty, only localhost is available. Note that the implicit localhost does not match 'all'
+
+PLAY [all] ********************************************************************************************************************
+skipping: no hosts matched
+
+PLAY RECAP ********************************************************************************************************************
+```
+
+Nesse momento ele nao achou as maquinas com que ele deve trabalhar pq nao encontrou o agrupamento all. Vamos explicitar isso e indicar o arquivo hosts
+```hosts
+[all]
+18.117.78.52
+3.144.93.48
+3.138.126.106
+
+[all:vars]
+ansible_ssh_private_key_file=/home/rogerio/Git/SmartCampusMaua/Docs/DevOps/Ansible/ansible-aws/aws-ansible.pem
+ansible_user=ubuntu
+```
+
+```bash
+❯ ansible-playbook -i hosts playbook.yaml
+
+PLAY [all] ********************************************************************************************************************
+
+TASK [Gathering Facts] ********************************************************************************************************
+ok: [18.117.78.52]
+ok: [3.138.126.106]
+ok: [3.144.93.48]
+
+TASK [Install nginx] **********************************************************************************************************
+changed: [3.144.93.48]
+changed: [18.117.78.52]
+changed: [3.138.126.106]
+
+PLAY RECAP ********************************************************************************************************************
+18.117.78.52               : ok=2    changed=1    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0   
+3.138.126.106              : ok=2    changed=1    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0   
+3.144.93.48                : ok=2    changed=1    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0
+```
+
+O primeiro passo quando ele está roadando um playbook é o Gathering Facts. Ele pega as infos que temos em cada uma das maquinas e entao sabe-se qual o estado atual da maquina e o tipo de comando que ele deve executar.
+
+A primeira tarefa que ele rodou foi instalar o nginx e já esta em amarelo no termonial. Isso significa que o comando que rodamos em nosso playbook realizou alguma alteraçao em nosso servidor. O ok=2 significa que ele realizou duas tarefas. 
+
+Agora, quando dermos o comando novamente, ele já percebe que o nginx já está instalado e entao fica tudo verde no terminal pq nao houve altereaçao
+
+
+```bash
+❯ ansible-playbook -i hosts playbook.yaml
+
+PLAY [all] ********************************************************************************************************************
+
+TASK [Gathering Facts] ********************************************************************************************************
+ok: [3.144.93.48]
+ok: [18.117.78.52]
+ok: [3.138.126.106]
+
+TASK [Install nginx] **********************************************************************************************************
+ok: [18.117.78.52]
+ok: [3.144.93.48]
+ok: [3.138.126.106]
+
+PLAY RECAP ********************************************************************************************************************
+18.117.78.52               : ok=2    changed=0    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0   
+3.138.126.106              : ok=2    changed=0    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0   
+3.144.93.48                : ok=2    changed=0    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0  
+```
+
+Se alterarmos o nginx de present para `absent`, vamos solicitar para desisntalar o nginx dos servidores.
+
+Dependendo de cada maquinaonde o nginx está sendo executado, o cache do apt pode nao estar atualizado. Por isso é importante colcoarmos para que ele seja atualizado.
+
+
+```hosts
+---
+- hosts: all
+  remote_user: ubuntu
+  become: true
+
+  tasks:
+    - name: Install nginx
+      apt:
+        name: nginx
+        state: present
+        update_cache: yes
+```
+
+```bash
+❯ ansible-playbook -i hosts playbook.yaml
+
+PLAY [all] ********************************************************************************************************************
+
+TASK [Gathering Facts] ********************************************************************************************************
+ok: [3.138.126.106]
+ok: [18.117.78.52]
+ok: [3.144.93.48]
+
+TASK [Install nginx] **********************************************************************************************************
+ok: [3.144.93.48]
+ok: [3.138.126.106]
+ok: [18.117.78.52]
+
+PLAY RECAP ********************************************************************************************************************
+18.117.78.52               : ok=2    changed=0    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0   
+3.138.126.106              : ok=2    changed=0    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0   
+3.144.93.48                : ok=2    changed=0    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0   
+```
+
+
+
+Normalmente quando rodamos o nginx pela primeira vez ele já sobe. Mas queremos ter certeza que ele está rodando. Podemos entao trabalhar com services (systemd). Entao vamosgarantir que o serviço do nginx está instalado e iniciado.
+
+```hosts
+---
+- hosts: all
+  remote_user: ubuntu
+  become: true
+
+  tasks:
+    - name: Install nginx
+      apt:
+        name: nginx
+        state: present
+        update_cache: yes
+
+    - name: Init nginx
+      service:
+        name: nginx
+        state: started
+```
+
+E esse é um ponto extremamente importante!
+```bash
+❯ ansible-playbook -i hosts playbook.yaml
+
+PLAY [all] ********************************************************************************************************************
+
+TASK [Gathering Facts] ********************************************************************************************************
+ok: [3.144.93.48]
+ok: [18.117.78.52]
+ok: [3.138.126.106]
+
+TASK [Install nginx] **********************************************************************************************************
+ok: [3.144.93.48]
+ok: [18.117.78.52]
+ok: [3.138.126.106]
+
+TASK [Init nginx] *************************************************************************************************************
+ok: [3.144.93.48]
+ok: [18.117.78.52]
+ok: [3.138.126.106]
+
+PLAY RECAP ********************************************************************************************************************
+18.117.78.52               : ok=3    changed=0    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0   
+3.138.126.106              : ok=3    changed=0    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0   
+3.144.93.48                : ok=3    changed=0    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0  
+```
+
+
+Se quiséssemos que o nginx fosse reiniciado, poreiamos colocar o service como `restarted`
+
+
+```hosts
+---
+- hosts: all
+  remote_user: ubuntu
+  become: true
+
+  tasks:
+    - name: Install nginx
+      apt:
+        name: nginx
+        state: present
+        update_cache: yes
+
+    - name: Init nginx
+      service:
+        name: nginx
+        state: restarted
+```
+
+```bash
+❯ ansible-playbook -i hosts playbook.yaml
+
+PLAY [all] ********************************************************************************************************************
+
+TASK [Gathering Facts] ********************************************************************************************************
+ok: [3.138.126.106]
+ok: [3.144.93.48]
+ok: [18.117.78.52]
+
+TASK [Install nginx] **********************************************************************************************************
+ok: [3.144.93.48]
+ok: [18.117.78.52]
+ok: [3.138.126.106]
+
+TASK [Init nginx] *************************************************************************************************************
+changed: [3.144.93.48]
+changed: [18.117.78.52]
+changed: [3.138.126.106]
+
+PLAY RECAP ********************************************************************************************************************
+18.117.78.52               : ok=3    changed=1    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0   
+3.138.126.106              : ok=3    changed=1    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0   
+3.144.93.48                : ok=3    changed=1    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0
+```
+
+E dessa vez ficou amarelo pq ele conseguiu restartar o serviço do nginx e houve uma alteração! Vamos deixar como `started`
+
+
+UMa coisa que devemos estar ligados é que tanto o apt como o service trabaçham como uma especie de plugin no Ansible.
+https://docs.ansible.com/ansible/latest/collections/ansible/builtin/apt_module.html
+
+De acordo com a doc, vemos todas as possibilidades do apt. Inclusive, como podemosinstalar diversos pacotes ao mesmo tempo
+```yaml
+...
+- name: Install a list of packages
+  ansible.builtin.apt:
+    pkg:
+    - foo
+    - foo-tools
+...
+```
+
+NO ansible, conseguimos rodar comandos do docker, docker compose e tb do k8s!
+https://docs.ansible.com/ansible/latest/collections/community/docker/index.html
+https://docs.ansible.com/ansible/latest/collections/community/docker/docker_compose_module.html
+
+Temos plugins que podemos instalar, outros que ja vem, e  por isso podemos ter acesso pela documentaçao!
+
+
+## Trabalhando com ansible galaxy
+Como organizar os nossos playbooks especialmente se ele forem muito grandes?
+
+A ferramenta que nos ajuda a criar diretorios e estruturas para conseguirmos trabalhar tudo de forma organizada é chamada de ansible galaxy.
+
+NO ansible galaxy trabalhamos com roles (funçoes que queremos executar algo)
+
+Vamos criar uma pasta chama roles. Podemos ter tarefas especificas para instalar um docker, criar um ambiente e diversos tipos de tarefas ou u  agrupamento delas. Instalar um docker nao é um comando apenas. Podemos ter uma role especifica para isso.
+
+Dentro da pasta roles podemos ter diversos playbooks que sejam organizados. O ansible galaxy nos ajuda a fazer esse processo de organização.
+
+Dentro da pasta roles, vamos iniciar com o comando ansible galaxy init
+```bash
+❯ mkdir roles
+❯ cd roles
+❯ ansible-galaxy init install_nginx
+- Role install_nginx was created successfully
+```
+
+E entao vemos que foram criadas um monte de pastas!
+```bash
+❯ ls install_nginx 
+defaults  files  handlers  meta  README.md  tasks  templates  tests  vars
+```
+
+Essas pastas tem o objetivo de organizar e separar as responsabilidades de cada tarefa. Normalmente vamos utilizar mais as pastas files, handlers, tasks, templates e vars. 
+
+Para deixar esse conjunto de pastas um pouco mais clara, o ponto central é a pasta de tasks/main.yml. Nela vamos fazer as principais tarefas que sejam executadas na hora em que formos trabalhar para suburmos o nginx, por exemplo. Esse é um dos pontos ,ais importantes.
+
+Ao inves de criarmos todo o cabeçalho que fizemos no arquivo playbook.yaml, vamos copiar apenas o que está dentro de tasks.
+```yaml
+---
+- name: Install nginx
+  apt:
+    name: nginx
+    state: present
+    update_cache: yes
+
+- name: Init nginx
+  service:
+    name: nginx
+    state: started
+```
+
+Eagora temos a nossa tarefa para rodarmos o nosso playbook.
+
+E como executar os playbooks? Na raiz da pasta roles vamos criar um arquivo chamado de main.yaml e ai vamos colocar as nossas configuraçoes!
+```yaml
+- hosts: all
+  become: true
+  roles:
+    - install_nginx
+```
+
+E entao quando rodarmos esse main.yaml playbook, ele vai ler esse arquivo, ir na role, entrar na role install_nginx, vai buscar as tarefas e começar a executar.
+
+Vamos rodar:
+```bash
+❯ ansible-playbook -i ../hosts main.yaml 
+
+PLAY [all] ********************************************************************************************************************
+
+TASK [Gathering Facts] ********************************************************************************************************
+ok: [3.144.93.48]
+ok: [3.138.126.106]
+ok: [18.117.78.52]
+
+TASK [install_nginx : Install nginx] ******************************************************************************************
+ok: [18.117.78.52]
+ok: [3.138.126.106]
+ok: [3.144.93.48]
+
+TASK [install_nginx : Init nginx] *********************************************************************************************
+ok: [3.138.126.106]
+ok: [18.117.78.52]
+ok: [3.144.93.48]
+
+PLAY RECAP ********************************************************************************************************************
+18.117.78.52               : ok=3    changed=0    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0   
+3.138.126.106              : ok=3    changed=0    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0   
+3.144.93.48                : ok=3    changed=0    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0  
+```
+
+Dessa forma, executamos o nosso playbook dentro da estrutura do ansible-galaxy! As pastas foram criadas e agora estamos rodando o playbook baseado em roles! Temos pastas e toda uma estrutura para trabalharmos com os playbooks!
+
+
+## Instalando docker usando ansible-role
+Vamos seguir por padrao o manual do docker!
+https://docs.docker.com/engine/install/ubuntu/
+
+Em roles:
+```bash
+❯ ansible-galaxy init install_docker
+- Role install_docker was created successfully
+```
+
+É de boa pratica se o arquivo yaml for muito grande colcoarmos comandos include dentro do yaml principal.
+
+Para instalar o docker, de acordo com a documentação
+```bash
+# Add Docker's official GPG key:
+sudo apt-get update
+sudo apt-get install ca-certificates curl
+sudo install -m 0755 -d /etc/apt/keyrings
+sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+sudo chmod a+r /etc/apt/keyrings/docker.asc
+
+# Add the repository to Apt sources:
+echo \
+  "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu \
+  $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | \
+  sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+sudo apt-get update
+``` 
+
+Entao, em roles/install_docker/tasks/main.yml:
+``` yaml
+---
+- name: install libs
+  apt:
+    name:
+      - ca-certificates
+      - curl
+    state: present
+    update-cache: yes
+```
+
+Em roles/main.yaml
+```yaml
+- hosts: all
+  become: true
+  roles:
+    - install_nginx
+    - install_docker
+```
+
+E vamos rodar. Primeiramente ele vai executar a role do nginx e depois instalar as bibliotecas para o docker
+```bash
+❯ ansible-playbook -i ../hosts main.yaml
+
+PLAY [all] *****************************************************************************************************************
+
+TASK [Gathering Facts] *****************************************************************************************************
+ok: [3.138.126.106]
+ok: [18.117.78.52]
+ok: [3.144.93.48]
+
+TASK [install_nginx : Install nginx] ***************************************************************************************
+ok: [3.138.126.106]
+ok: [3.144.93.48]
+ok: [18.117.78.52]
+
+TASK [install_nginx : Init nginx] ******************************************************************************************
+ok: [3.138.126.106]
+ok: [3.144.93.48]
+ok: [18.117.78.52]
+
+TASK [install_docker : install libs] ***************************************************************************************
+ok: [3.144.93.48]
+ok: [18.117.78.52]
+ok: [3.138.126.106]
+
+PLAY RECAP *****************************************************************************************************************
+18.117.78.52               : ok=4    changed=0    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0   
+3.138.126.106              : ok=4    changed=0    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0   
+3.144.93.48                : ok=4    changed=0    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0  
+```
+
+E deu certo! Vamos para o proximo passo de instalar a gpg key para adicioanr um outro repositorio externo no source list do apt para conseguirmos realizar a instalação do docker
+
+Em roles/install_docker/tasks/main.yml:
+```yaml
+---
+- name: install libs
+  apt:
+    name:
+      - ca-certificates
+      - curl
+    state: present
+    update-cache: yes
+
+- name: Create directory for Docker's GPG key
+  ansible.builtin.file:
+    path: /etc/apt/keyrings
+    state: directory
+    mode: '0755'
+
+- name: Add Docker's official GPG key
+  ansible.builtin.apt_key:
+    url: https://download.docker.com/linux/ubuntu/gpg
+    keyring: /etc/apt/keyrings/docker.gpg
+    state: present
+
+- name: Print architecture variables
+  ansible.builtin.debug:
+    msg: "Architecture: {{ ansible_architecture }}, Codename: {{ ansible_lsb.codename }}"
+
+- name: Add Docker repository
+  ansible.builtin.apt_repository:
+    repo: >-
+      deb [arch={{ arch_mapping[ansible_architecture] | default(ansible_architecture) }}
+      signed-by=/etc/apt/keyrings/docker.gpg]
+      https://download.docker.com/linux/ubuntu {{ ansible_lsb.codename }} stable
+    filename: docker
+    state: present
+```
+
+E entao comentar a role do install_nginx em roles/main.yaml
+```yaml
+- hosts: all
+  become: true
+  roles:
+    # - install_nginx
+    - install_docker
+```
+
+E rodar o ansible-playbook:
+```bash
+❯ ansible-playbook -i ../hosts main.yaml
+
+PLAY [all] *****************************************************************************************************************
+
+TASK [Gathering Facts] *****************************************************************************************************
+ok: [3.144.93.48]
+ok: [18.117.78.52]
+ok: [3.138.126.106]
+
+TASK [install_docker : install libs] ***************************************************************************************
+ok: [3.144.93.48]
+ok: [18.117.78.52]
+ok: [3.138.126.106]
+
+TASK [install_docker : Create directory for Docker's GPG key] **************************************************************
+ok: [18.117.78.52]
+ok: [3.138.126.106]
+ok: [3.144.93.48]
+
+TASK [install_docker : Add Docker's official GPG key] **********************************************************************
+ok: [3.138.126.106]
+ok: [3.144.93.48]
+ok: [18.117.78.52]
+
+TASK [install_docker : Print architecture variables] ***********************************************************************
+ok: [18.117.78.52] => {
+    "msg": "Architecture: x86_64, Codename: jammy"
+}
+ok: [3.144.93.48] => {
+    "msg": "Architecture: x86_64, Codename: jammy"
+}
+ok: [3.138.126.106] => {
+    "msg": "Architecture: x86_64, Codename: jammy"
+}
+
+TASK [install_docker : Add Docker repository] ******************************************************************************
+ok: [18.117.78.52]
+ok: [3.138.126.106]
+ok: [3.144.93.48]
+
+PLAY RECAP *****************************************************************************************************************
+18.117.78.52               : ok=6    changed=0    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0   
+3.138.126.106              : ok=6    changed=0    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0   
+3.144.93.48                : ok=6    changed=0    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0 
+``` 
+
+E vamos instalar o DOcker Engine!
+Em roles/main.yaml
+```yaml
+- hosts: all
+  become: true
+  vars:
+    arch_mapping:  # Map ansible architecture {{ ansible_architecture }} names to Docker's architecture names
+      x86_64: amd64
+      aarch64: arm64
+  roles:
+    # - install_nginx
+    - install_docker
+```
+
+Em roles/install_docker/tasks/main.yml:
+```yaml
+---
+- name: install libs
+  apt:
+    name:
+      - ca-certificates
+      - curl
+    state: present
+    update-cache: yes
+
+- name: Create directory for Docker's GPG key
+  file:
+    path: /etc/apt/keyrings
+    state: directory
+    mode: '0755'
+
+- name: Add Docker's official GPG key
+  apt_key:
+    url: https://download.docker.com/linux/ubuntu/gpg
+    keyring: /etc/apt/keyrings/docker.gpg
+    state: present
+
+- name: Print architecture variables
+  debug:
+    msg: "Architecture: {{ ansible_architecture }}, Codename: {{ ansible_lsb.codename }}"
+
+- name: Add Docker repository
+  apt_repository:
+    repo: >-
+      deb [arch={{ arch_mapping[ansible_architecture] | default(ansible_architecture) }}
+      signed-by=/etc/apt/keyrings/docker.gpg]
+      https://download.docker.com/linux/ubuntu {{ ansible_lsb.codename }} stable
+    filename: docker
+    state: present
+
+- name: Install Docker and related packages
+  apt:
+    name: "{{ item }}"
+    state: present
+    update_cache: true
+  loop:
+    - docker-ce
+    - docker-ce-cli
+    - containerd.io
+    - docker-buildx-plugin
+    - docker-compose-plugin
+```
+
+```bash
+❯ ansible-playbook -i ../hosts main.yaml
+
+PLAY [all] *****************************************************************************************************************
+
+TASK [Gathering Facts] *****************************************************************************************************
+ok: [18.117.78.52]
+ok: [3.144.93.48]
+ok: [3.138.126.106]
+
+TASK [install_docker : install libs] ***************************************************************************************
+ok: [3.144.93.48]
+ok: [18.117.78.52]
+ok: [3.138.126.106]
+
+TASK [install_docker : Create directory for Docker's GPG key] **************************************************************
+ok: [3.138.126.106]
+ok: [3.144.93.48]
+ok: [18.117.78.52]
+
+TASK [install_docker : Add Docker's official GPG key] **********************************************************************
+ok: [3.138.126.106]
+ok: [3.144.93.48]
+ok: [18.117.78.52]
+
+TASK [install_docker : Print architecture variables] ***********************************************************************
+ok: [18.117.78.52] => {
+    "msg": "Architecture: x86_64, Codename: jammy"
+}
+ok: [3.144.93.48] => {
+    "msg": "Architecture: x86_64, Codename: jammy"
+}
+ok: [3.138.126.106] => {
+    "msg": "Architecture: x86_64, Codename: jammy"
+}
+
+TASK [install_docker : Add Docker repository] ******************************************************************************
+changed: [3.144.93.48]
+changed: [3.138.126.106]
+changed: [18.117.78.52]
+
+TASK [install_docker : Install Docker and related packages] ****************************************************************
+changed: [3.144.93.48] => (item=docker-ce)
+changed: [18.117.78.52] => (item=docker-ce)
+changed: [3.138.126.106] => (item=docker-ce)
+ok: [3.144.93.48] => (item=docker-ce-cli)
+ok: [18.117.78.52] => (item=docker-ce-cli)
+ok: [3.138.126.106] => (item=docker-ce-cli)
+ok: [3.144.93.48] => (item=containerd.io)
+ok: [18.117.78.52] => (item=containerd.io)
+ok: [3.138.126.106] => (item=containerd.io)
+ok: [3.144.93.48] => (item=docker-buildx-plugin)
+ok: [3.138.126.106] => (item=docker-buildx-plugin)
+ok: [18.117.78.52] => (item=docker-buildx-plugin)
+ok: [3.144.93.48] => (item=docker-compose-plugin)
+ok: [3.138.126.106] => (item=docker-compose-plugin)
+ok: [18.117.78.52] => (item=docker-compose-plugin)
+
+PLAY RECAP *****************************************************************************************************************
+18.117.78.52               : ok=7    changed=2    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0   
+3.138.126.106              : ok=7    changed=2    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0   
+3.144.93.48                : ok=7    changed=2    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0  
+```
+
+Para verificar, vamos pegar o IPde alguma das maquinas e fazer um acesso via ssh para verificar se o DOcker está instalado
+
+```bash
+ubuntu@ip-172-31-12-50:~$ docker --version
+Docker version 25.0.3, build 4debf41
+```
+
+E está instalado nas nossas tres maquinas com o nginx!
+```bash
+ubuntu@ip-172-31-12-50:~$ ps -aux | grep nginx
+root        3724  0.0  0.2  55220  2208 ?        Ss   00:56   0:00 nginx: master process /usr/sbin/nginx -g daemon on; master_process on;
+www-data    3725  0.0  0.4  55852  4640 ?        S    00:56   0:00 nginx: worker process
+ubuntu     29056  0.0  0.2   7004  2304 pts/0    S+   03:23   0:00 grep --color=auto nginx
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

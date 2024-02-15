@@ -1,0 +1,8 @@
+[all]
+18.117.78.52
+3.144.93.48
+3.138.126.106
+
+[all:vars]
+ansible_ssh_private_key_file=/home/rogerio/Git/SmartCampusMaua/Docs/DevOps/Ansible/ansible-aws/aws-ansible.pem
+ansible_user=ubuntu
