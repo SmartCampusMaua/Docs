@@ -3445,11 +3445,134 @@ Estão lá!
 Vamos copiar o app/files/index.js para dentro do roles/install_nginx/files
 
 ## Trabalhando copm templates
+E se quisessemos alterar alguma coisa em tempo de execuçao na hora em que fossemos instalar? Como se fosse uma variavel do index.js, por exemplo?
 
+O ansisible trabalha com o jinja2 do python e podemos fazer essa alteraçao
 
+Ai inves de colocar o index,js no files, vamos move-lo para templates. E uma vez que ele esta dentro de templates, podemos mudar o que esta escrito no index.js. Vamos renomear o index,js para index.js.j2, que [e a extensao do template python quando se usa o jinja2.
 
+```j2
+const express = require('express');
+const app = express();
+const port = 3002;
 
+app.get('/', (req, res) => res.send('{{ hello_fullcycle }}'));
 
+app.listen(port, () => console.log(`Example app listening on port ${port}!`));
+```
+
+Utilizando a linguagem de template podemos pedir para que o valor que está entre {{}} seja substituido pelas variaveis que fivam localizadas na pasta vars/main.yml
+```yaml
+---
+hello_fullcycle: "Hello Full Cycle !!!"
+```
+
+A ideia é que quando o ansible for copiar o index.js.j2, ele substitua pelo valor que esta na variavel.
+
+Para copiar esse arquivo de template, em roles/install_nginx/files/main.yml
+```yaml
+---
+- name: Install nginx
+  apt:
+    pkg:
+      - nginx
+      - nodejs
+      - npm
+    state: present
+    update_cache: yes
+
+- name: Init nginx
+  service:
+    name: nginx
+    state: started
+
+- name: create dir /app
+  file:
+    path: /app
+    state: directory
+
+- name: copy package.json
+  copy: 
+    src: package.json
+    dest: /app/package.json
+
+- name: npm install
+  npm:
+    path: /app
+    state: present
+
+- name: copy index.js
+  template: 
+    src: index.js.j2
+    dest: /app/index.js
+``` 
+
+Vamos executar:
+```bash
+❯ ansible-playbook -i ../hosts main.yaml       
+
+PLAY [all] ********************************************************************************************************
+
+TASK [Gathering Facts] ********************************************************************************************
+ok: [18.117.78.52]
+ok: [3.144.93.48]
+ok: [3.138.126.106]
+
+TASK [install_nginx : Install nginx] ******************************************************************************
+ok: [3.144.93.48]
+ok: [3.138.126.106]
+ok: [18.117.78.52]
+
+TASK [install_nginx : Init nginx] *********************************************************************************
+ok: [3.144.93.48]
+ok: [3.138.126.106]
+ok: [18.117.78.52]
+
+TASK [install_nginx : create dir /app] ****************************************************************************
+ok: [3.144.93.48]
+ok: [3.138.126.106]
+ok: [18.117.78.52]
+
+TASK [install_nginx : copy package.json] **************************************************************************
+ok: [3.144.93.48]
+ok: [18.117.78.52]
+ok: [3.138.126.106]
+
+TASK [install_nginx : npm install] ********************************************************************************
+ok: [3.144.93.48]
+ok: [3.138.126.106]
+ok: [18.117.78.52]
+
+TASK [install_nginx : copy index.js] ******************************************************************************
+changed: [3.144.93.48]
+changed: [3.138.126.106]
+changed: [18.117.78.52]
+
+PLAY RECAP ********************************************************************************************************
+18.117.78.52               : ok=7    changed=1    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0   
+3.138.126.106              : ok=7    changed=1    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0   
+3.144.93.48                : ok=7    changed=1    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0
+```
+
+Vamos entrar no server para ver
+```bash
+ubuntu@ip-172-31-12-50:~$ cat /app/index.js 
+const express = require('express');
+const app = express();
+const port = 3002;
+
+app.get('/', (req, res) => res.send('Hello Full Cycle !!!'));
+
+app.listen(port, () => console.log(`Example app listening on port ${port}!`))
+```
+
+E foi substituido pelo valor da variavel!
+
+Normalmente, nessas avriaveis configuramos variaveis de ambiente e de servidor, na aplicaçoes como essa de um nodejs.
+
+Esse sao exemplos de como podemos fazer!
+
+Vamos fazer com que o nginx receba as solicitaçoes e rodando como se fosse um serviço qualquer.
 
 
 
