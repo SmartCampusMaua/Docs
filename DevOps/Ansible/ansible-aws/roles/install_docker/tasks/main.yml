@@ -4,6 +4,9 @@
     name:
       - ca-certificates
       - curl
+      - python3-pip
+      - virtualenv
+      - python3-setuptools
     state: present
     update-cache: yes
 
@@ -43,6 +46,11 @@
     - containerd.io
     - docker-buildx-plugin
     - docker-compose-plugin
+
+- name: install pip docker
+  pip:
+    name: docker  
+    state: present
 
 # - name: Add Docker group
 #   ansible.builtin.group:

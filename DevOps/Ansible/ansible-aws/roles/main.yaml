@@ -5,5 +5,32 @@
       x86_64: amd64
       aarch64: arm64
   roles:
-    # - install_nginx
-    - install_docker
+    - install_nginx
+    # - install_docker
+
+# - hosts: manager
+#   become: true
+#   vars:
+#     arch_mapping:
+#       x86_64: amd64
+#       aarch64: arm64
+#   roles:
+#     - docker_swarm_manager
+
+# - hosts: worker
+#   become: true
+#   vars:
+#     arch_mapping:
+#       x86_64: amd64
+#       aarch64: arm64
+#   roles:
+#     - docker_swarm_worker
+
+# - hosts: manager
+#   become: true
+#   vars:
+#     arch_mapping:
+#       x86_64: amd64
+#       aarch64: arm64
+#   roles:
+#     - deploy_stack

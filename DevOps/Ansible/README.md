@@ -2691,6 +2691,11 @@ PLAY RECAP *********************************************************************
 Para verificar, vamos pegar o IPde alguma das maquinas e fazer um acesso via ssh para verificar se o DOcker está instalado
 
 ```bash
+cd DevOps/Ansible/ansible-aws
+
+```
+
+```bash
 ubuntu@ip-172-31-12-50:~$ docker --version
 Docker version 25.0.3, build 4debf41
 ```
@@ -2703,39 +2708,743 @@ www-data    3725  0.0  0.4  55852  4640 ?        S    00:56   0:00 nginx: worker
 ubuntu     29056  0.0  0.2   7004  2304 pts/0    S+   03:23   0:00 grep --color=auto nginx
 ```
 
+## Inicializando docker-swarm
+Swarm é um cluster de docker com um balanceador de carga.
+
+Vamos adiconar mais roles para trabalhaarmos com swarm. No swarm existem os Managers e os Workers. Os managers gerenciam os clusters. Vamos sepaqrar em hosts quais serao managers e quais serao workrs
+```hosts
+[manager]
+18.117.78.52
+
+[worker]
+3.144.93.48
+3.138.126.106
+
+[all:vars]
+ansible_ssh_private_key_file=/home/rogerio/Git/SmartCampusMaua/Docs/DevOps/Ansible/ansible-aws/aws-ansible.pem
+ansible_user=ubuntu
+```
+
+A   gora que categorizamos os Ips em Manager e workers, somos obrigados a duplicar o arquivo roles/main.yaml para trabalharmos tb com a categoria maneger
+```yaml
+# - hosts: all
+#   become: true
+#   vars:
+#     arch_mapping:  # Map ansible architecture {{ ansible_architecture }} names to Docker's architecture names
+#       x86_64: amd64
+#       aarch64: arm64
+#   roles:
+#     # - install_nginx
+#     - install_docker
+
+- hosts: manager
+  become: true
+  vars:
+    arch_mapping:  # Map ansible architecture {{ ansible_architecture }} names to Docker's architecture names
+      x86_64: amd64
+      aarch64: arm64
+  roles:
+    - docker_swarm_manager
+    # - install_docker
+```
+
+E vamos criar uma nova role para o docker_swarm_manager
+```bash
+cd roles
+❯ ansible-galaxy init docker_swarm_manager
+- Role docker_swarm_manager was created successfully
+```
+
+Em roles/docker_swarm_manager/tasks, vamos iniciar o docker em swarm mode
+```yaml
+---
+- name: Init Docker Swarm
+  docker_swarm: 
+    state: present
+```
+
+E entao vamos rodar o nosso ansible-playbook
+```bash
+❯ cd roles 
+❯ ansible-playbook -i ../hosts main.yaml
+```
+
+Vamos verificar se o docker swarm está instalado
+```bash
+❯ ssh -i ../aws-ansible.pem ubuntu@18.117.78.52
+```
+```bash
+ubuntu@ip-172-31-12-50:~$ docker swarm
+
+Usage:  docker swarm COMMAND
+
+Manage Swarm
+
+Commands:
+  ca          Display and rotate the root CA
+  init        Initialize a swarm
+  join        Join a swarm as a node and/or manager
+  join-token  Manage join tokens
+  leave       Leave the swarm
+  unlock      Unlock swarm
+  unlock-key  Manage the unlock key
+  update      Update the swarm
+
+Run 'docker swarm COMMAND --help' for more information on a command.
+```
+
+Pronto! Vamos verificar se temos comandos rodando em nosso cluster:
+```bash
+ubuntu@ip-172-31-12-50:~$ sudo su
+root@ip-172-31-12-50:/home/ubuntu# docker node ls
+ID                            HOSTNAME          STATUS    AVAILABILITY   MANAGER STATUS   ENGINE VERSION
+8eb0wjjzue4fxdurrb4lgkdf1 *   ip-172-31-12-50   Ready     Active         Leader           25.0.3
+```
+
+Temos um node rodando e ele é o tipo lider (manager).
+
+E como fazemos para outras maquinas join o cluster? Nesse momento que precisamos ter um token (url) para acessarmos o cluster tanto como manager como quanto worker
+
+```bash
+root@ip-172-31-12-50:/home/ubuntu# docker swarm join-token worker
+To add a worker to this swarm, run the following command:
+
+    docker swarm join --token SWMTKN-1-3h5uqsxv43sndjvjzsvsgtz1jekyvtj6xflsy0pphrfeffg728-7708uho15ctmfgo7hon23uwlx 172.31.12.50:2377
+```
+De acordo com a resposta do comando acima, a máquina que rwalizar o comando 
+```bash
+    docker swarm join --token SWMTKN-1-3h5uqsxv43sndjvjzsvsgtz1jekyvtj6xflsy0pphrfeffg728-7708uho15ctmfgo7hon23uwlx 172.31.12.50:2377
+```
+passa a fazer parte do cluster!
+
+O grande ponto é um "problema" pq quando damos um init, nao sabemos qual o nosso token via ansible. Como podemos rodar um comando e pegar o token que foi gerado e reutulizar oi token em outros playbooks.
+
+Em roles/docker_swarm_manager/tasks/main.ymlm e vamos registrar o id especifico da tarefa de criaáo do clluster `init_swarm`. E entao vamos acessar os outputs dessa tarefa
+```yaml
+---
+- name: Init Docker Swarm
+  docker_swarm: 
+    state: present
+  register: init_swarm
+
+- name: join
+  set_fact: 
+    join_token_worker: "{{ init_swarm.swarm_facts.JoinTokens.Worker }}"
+```
+
+Vamos executar o playbook no manager!
+```bash
+❯ ansible-playbook -i ../hosts main.yaml
+
+PLAY [manager] ****************************************************************************************************
+
+TASK [Gathering Facts] ********************************************************************************************
+ok: [18.117.78.52]
+
+TASK [docker_swarm_manager : Init Docker Swarm] *******************************************************************
+ok: [18.117.78.52]
+
+TASK [docker_swarm_manager : join] ********************************************************************************
+ok: [18.117.78.52]
+
+PLAY RECAP ********************************************************************************************************
+18.117.78.52               : ok=3    changed=0    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0   
+```
+
+Agora vamos criar uma role especiffica apra que as nossas outras duas maquinas façam o join no nosso cluster!
+
+## Realizando join no cluster
+Vamos criar um galaxy-playbook poara os workers
+```bash
+❯ ansible-galaxy init docker_swarm_worker    
+- Role docker_swarm_worker was created successfully
+```
+
+Em roles/main.yaml, vamos criar uma chamada para os workers
+```yaml
+# - hosts: all
+#   become: true
+#   vars:
+#     arch_mapping:  # Map ansible architecture {{ ansible_architecture }} names to Docker's architecture names
+#       x86_64: amd64
+#       aarch64: arm64
+#   roles:
+#     # - install_nginx
+#     - install_docker
+
+- hosts: manager
+  become: true
+  vars:
+    arch_mapping:
+      x86_64: amd64
+      aarch64: arm64
+  roles:
+    - docker_swarm_manager
+
+- hosts: worker
+  become: true
+  vars:
+    arch_mapping:
+      x86_64: amd64
+      aarch64: arm64
+  roles:
+    - docker_swarm_worker
+```
+
+Nas tasks do docker_swarm_worker vamos realizar apenas uma task para realizarmos o join no cluster. E para que o docker de o join no cluster, temos que conseguir pegar o token gerado pelo manager, o ip do manager e o ip das próprias máquinas workrs.
+roles/docker_swarm_worker/tasks/main.yml
+```yaml
+---
+- name: join in a swarm cluster
+  docker_swarm:
+    state: join
+    advertise_addr: "{{ ansible_default_ipv4.address }}"
+    join_token: "{{ hostvars[groups['manager'][0]].join_token_worker }}"
+    remote_addrs: "{{ hostvars[groups['manager'][0]]['ansible_default_ipv4']['address'] }}"
+```
+
+Geralmente, o comando de join do ansible, ele usa a porta 2377, entretanto na AWS apenas está habilitada a comunicação vai SSH na porta 22 como permissao de inbound nos security grups da AWS. Entao, no console da aws, vamos em EC2 -> acessar a instancia com IP 18.117.78.52 -> Security -> Edit Inbound Rules -> All Traffic
+
+Agora abrimos as portas para chegar nessas maquinas e permissao para realizar o join via ansibler
+
+Vamos executar o playbook
+```bash
+❯ ansible-playbook -i ../hosts main.yaml
+
+PLAY [manager] ****************************************************************************************************
+
+TASK [Gathering Facts] ********************************************************************************************
+ok: [18.117.78.52]
+
+TASK [docker_swarm_manager : Init Docker Swarm] *******************************************************************
+ok: [18.117.78.52]
+
+TASK [docker_swarm_manager : join] ********************************************************************************
+ok: [18.117.78.52]
+
+PLAY [worker] *****************************************************************************************************
+
+TASK [Gathering Facts] ********************************************************************************************
+ok: [3.144.93.48]
+ok: [3.138.126.106]
+
+TASK [docker_swarm_worker : join in a swarm cluster] **************************************************************
+changed: [3.144.93.48]
+changed: [3.138.126.106]
+
+PLAY RECAP ********************************************************************************************************
+18.117.78.52               : ok=3    changed=0    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0   
+3.138.126.106              : ok=2    changed=1    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0   
+3.144.93.48                : ok=2    changed=1    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0
+```
+
+Pronto! Agora as duas maquinas entraram no cluster!
+ Como temos a certeza do join? Vamos na maquina manager e verificar com o comando `docker node ls`. Somente o manager tem a capacidade de listar os nodes
+```bash
+❯ ssh -i ../aws-ansible.pem ubuntu@18.117.78.52
+Welcome to Ubuntu 22.04.3 LTS (GNU/Linux 6.2.0-1017-aws x86_64)
+
+ * Documentation:  https://help.ubuntu.com
+ * Management:     https://landscape.canonical.com
+ * Support:        https://ubuntu.com/advantage
+
+  System information as of Thu Feb 15 15:57:11 UTC 2024
+
+  System load:                      0.080078125
+  Usage of /:                       42.7% of 7.57GB
+  Memory usage:                     32%
+  Swap usage:                       0%
+  Processes:                        104
+  Users logged in:                  0
+  IPv4 address for docker0:         172.17.0.1
+  IPv4 address for docker_gwbridge: 172.18.0.1
+  IPv4 address for eth0:            172.31.12.50
+
+ * Ubuntu Pro delivers the most comprehensive open source security and
+   compliance features.
+
+   https://ubuntu.com/aws/pro
+
+Expanded Security Maintenance for Applications is not enabled.
+
+31 updates can be applied immediately.
+To see these additional updates run: apt list --upgradable
+
+Enable ESM Apps to receive additional future security updates.
+See https://ubuntu.com/esm or run: sudo pro status
 
 
+*** System restart required ***
+Last login: Thu Feb 15 15:55:13 2024 from 177.73.181.130
+ubuntu@ip-172-31-12-50:~$ sudo su
+root@ip-172-31-12-50:/home/ubuntu# docker node ls
+ID                            HOSTNAME          STATUS    AVAILABILITY   MANAGER STATUS   ENGINE VERSION
+l44eywm21g9xz4zib9gt6h3da     ip-172-31-5-189   Ready     Active                          25.0.3
+koozi4n0qd5anxbn0umbkzkj2     ip-172-31-6-135   Ready     Active                          25.0.3
+8eb0wjjzue4fxdurrb4lgkdf1 *   ip-172-31-12-50   Ready     Active         Leader           25.0.3
+```
+
+Pronto! T   emos as 3 maquinas em um cluster swarm! E podemos come;ar a fazer deploy de stacks/serviços no nosso cluster!
+
+## Fazendo deploy da stack
+Vamos criar um novo galaxy com o deply_stack
+```bash
+❯ ansible-galaxy init deploy_stack       
+- Role deploy_stack was created successfully
+```
+
+No deploy stack vamos precisar de um docker compose e uma tarefa para executar esse docker compose. Em deploy_stack -> files, vamos criar um arquivo docker-compose.yaml
+```yaml
+version: '3'
+services:
+  app:
+    image: wesleywillians/hello-express
+    ports:
+      - 3000:3000
+    deploy:
+      mode: replicated
+      replicas: 3
+      restart_policy:
+        condition: on-failure
+```
+
+Quando estamos trabalhando com as roles, podemos pegar os arquivos que estao dentro da pasta files e copiar para cada maquina de uma forma bem simples. vamos adiconar uma tarefa em tasks/main.yaml
+```yaml
+---
+- name: copy docker-compose to remote host
+  copy: 
+    src: "docker-compose.yaml"
+    dest: "/opt/docker-compose.yaml"
+    
+- name: deploy stack
+  docker_stack:
+    state: present
+    name: app
+    compose:
+      - "/opt/docker-compose.yaml"
+```
+
+Vamos copiar esses arquivos para a nossa maquina manager, que vai executar o docker-compose e replicar paa as outras maquinas. Para isso, em roles/main.yaml
+```yaml
+# - hosts: all
+#   become: true
+#   vars:
+#     arch_mapping:  # Map ansible architecture {{ ansible_architecture }} names to Docker's architecture names
+#       x86_64: amd64
+#       aarch64: arm64
+#   roles:
+#     # - install_nginx
+#     - install_docker
+
+- hosts: manager
+  become: true
+  vars:
+    arch_mapping:
+      x86_64: amd64
+      aarch64: arm64
+  roles:
+    - docker_swarm_manager
+
+- hosts: worker
+  become: true
+  vars:
+    arch_mapping:
+      x86_64: amd64
+      aarch64: arm64
+  roles:
+    - docker_swarm_worker
+
+- hosts: manager
+  become: true
+  vars:
+    arch_mapping:
+      x86_64: amd64
+      aarch64: arm64
+  roles:
+    - deploy_stack
+```
+
+Vamos executar:
+```bash
+❯ ansible-playbook -i ../hosts main.yaml
+
+PLAY [manager] ****************************************************************************************************
+
+TASK [Gathering Facts] ********************************************************************************************
+ok: [18.117.78.52]
+
+TASK [docker_swarm_manager : Init Docker Swarm] *******************************************************************
+ok: [18.117.78.52]
+
+TASK [docker_swarm_manager : join] ********************************************************************************
+ok: [18.117.78.52]
+
+PLAY [worker] *****************************************************************************************************
+
+TASK [Gathering Facts] ********************************************************************************************
+ok: [3.138.126.106]
+ok: [3.144.93.48]
+
+TASK [docker_swarm_worker : join in a swarm cluster] **************************************************************
+ok: [3.138.126.106]
+ok: [3.144.93.48]
+
+PLAY [manager] ****************************************************************************************************
+
+TASK [Gathering Facts] ********************************************************************************************
+ok: [18.117.78.52]
+
+TASK [deploy_stack : copy docker-compose to remote host] **********************************************************
+changed: [18.117.78.52]
+
+TASK [deploy_stack : deploy stack] ********************************************************************************
+changed: [18.117.78.52]
+
+PLAY RECAP ********************************************************************************************************
+18.117.78.52               : ok=6    changed=2    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0   
+3.138.126.106              : ok=2    changed=0    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0   
+3.144.93.48                : ok=2    changed=0    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0
+```
+
+Nesse ponto, ele copiou o arquivo do docker-compose para o manager e deu um deploy na stack!
+
+Vamos verificar acessando o manager e verificando se o docker do deploy está sendo executado:
+```bash
+❯ ssh -i ../aws-ansible.pem ubuntu@18.117.78.52
+Welcome to Ubuntu 22.04.3 LTS (GNU/Linux 6.2.0-1017-aws x86_64)
+
+ * Documentation:  https://help.ubuntu.com
+ * Management:     https://landscape.canonical.com
+ * Support:        https://ubuntu.com/advantage
+
+  System information as of Thu Feb 15 20:10:32 UTC 2024
+
+  System load:                      0.62939453125
+  Usage of /:                       55.4% of 7.57GB
+  Memory usage:                     41%
+  Swap usage:                       0%
+  Processes:                        110
+  Users logged in:                  0
+  IPv4 address for docker0:         172.17.0.1
+  IPv4 address for docker_gwbridge: 172.18.0.1
+  IPv4 address for eth0:            172.31.12.50
+
+ * Ubuntu Pro delivers the most comprehensive open source security and
+   compliance features.
+
+   https://ubuntu.com/aws/pro
+
+Expanded Security Maintenance for Applications is not enabled.
+
+31 updates can be applied immediately.
+To see these additional updates run: apt list --upgradable
+
+Enable ESM Apps to receive additional future security updates.
+See https://ubuntu.com/esm or run: sudo pro status
 
 
+*** System restart required ***
+Last login: Thu Feb 15 20:09:44 2024 from 189.8.23.170
+ubuntu@ip-172-31-12-50:~$ sudo su
+root@ip-172-31-12-50:/home/ubuntu# docker service ls
+ID             NAME      MODE         REPLICAS   IMAGE                                 PORTS
+xokzw96e2l7f   app_app   replicated   3/3        wesleywillians/hello-express:latest   *:3000->3000/tcp
+```
+
+E olha só! O serviço app com 3 replicas está rodando na porta 3000 do cluster!
+Para mais detalhes:
+```bash
+root@ip-172-31-12-50:/home/ubuntu# docker service ps app_app
+ID             NAME        IMAGE                                 NODE              DESIRED STATE   CURRENT STATE           ERROR     PORTS
+lsqjea3lvzcm   app_app.1   wesleywillians/hello-express:latest   ip-172-31-6-135   Running         Running 2 minutes ago             
+on7ptef1hdqp   app_app.2   wesleywillians/hello-express:latest   ip-172-31-12-50   Running         Running 2 minutes ago             
+7lyg3bblz8v9   app_app.3   wesleywillians/hello-express:latest   ip-172-31-5-189   Running         Running 2 minutes ago 
+```
+
+Para verificar o container rodando:
+```bash
+root@ip-172-31-12-50:/home/ubuntu# docker ps
+CONTAINER ID   IMAGE                                 COMMAND                  CREATED         STATUS         PORTS      NAMES
+e7f63ec5b7a7   wesleywillians/hello-express:latest   "docker-entrypoint.s…"   3 minutes ago   Up 3 minutes   3000/tcp   app_app.2.on7ptef1hdqpzha8ppzk2ppvn
+```
+
+Para escalar para 6 replicas:
+```bash
+root@ip-172-31-12-50:/home/ubuntu# docker service scale app_app=6
+app_app scaled to 6
+overall progress: 6 out of 6 tasks 
+1/6: running   [==================================================>] 
+2/6: running   [==================================================>] 
+3/6: running   [==================================================>] 
+4/6: running   [==================================================>] 
+5/6: running   [==================================================>] 
+6/6: running   [==================================================>] 
+verify: Service converged 
+```
+
+Ele escala para 6 containeres rodando dentro do cluster
+
+Vamos fazer um teste clicando nas instancias, em Ip publico e entao na porta 3000
+http://18.117.78.52:3000/
+http://3.138.126.106:3000/
+http://3.144.93.48:3000/
+
+E todas retornaram Fullcycle no navegador! 
+
+Realizamos toda a configuraáo do docker até as configuraçao de nossas maquinas!
+
+Um ponto importante do pq issso esta funcionando: NA ROLE DOCKER_INSTALL EXISTE O PACOTE JSONNDIFF, PYTHON-PIP3, VIRTUALENV E PYTHON3-SETUPTOOLS.
+
+Sempre lembrando que temos o plugin do docker communit do Docker no ansible!
+
+# Outras funcionalidades
+## Criando app com express
+Vamos criar uma pagina de ola mundo com o express e nginx como proxy reverso. Vamos criar uma pasta na raiz do projeto chamada app. Vamos criar um proketo node dentro dessa pasta
+```bash
+❯ cd app
+❯ npm init
+This utility will walk you through creating a package.json file.
+It only covers the most common items, and tries to guess sensible defaults.
+
+See `npm help init` for definitive documentation on these fields
+and exactly what they do.
+
+Use `npm install <pkg>` afterwards to install a package and
+save it as a dependency in the package.json file.
+
+Press ^C at any time to quit.
+package name: (app) 
+version: (1.0.0) 
+description: 
+entry point: (index.js) 
+test command: 
+git repository: 
+keywords: 
+author: 
+license: (ISC) 
+About to write to /Users/rogeriocassares/Git/SmartCampusMaua/Docs/DevOps/Ansible/ansible-aws/app/package.json:
+
+{
+  "name": "app",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "",
+  "license": "ISC"
+}
 
 
+Is this OK? (yes)
+```
+
+Agora vamos instalar o express
+```bash
+❯ npm i express                                     
+
+added 64 packages, and audited 65 packages in 2s
+
+12 packages are looking for funding
+  run `npm fund` for details
+
+found 0 vulnerabilities
+```
+
+E vamos criar um simples index.js
+```js
+const express = require('express');
+const app = express();
+const port = 3002;
+
+app.get('/', (req, res) => res.send('Hello Full Cycle'));
+
+app.listen(port, () => console.log(`Example app listening on port ${port}!`));
+```
+
+Vamos verificar se está rodando o codigo
+```bash
+❯ node index.js
+Example app listening on port 3002!
+```
+
+E acessar a porta 3002 pelo navegador
+http://localhost:3002/
+
+E funcionou!
+
+Agora vamos imaginar que queremos fazer a mesma coisa utilizando o ansible.
+
+A primeira coisa seria criar um role que faz a instalaçao com o ansible e depois fazer o nginx apontar para essa aplicaçao atraves do ansible!
+
+## Rodando nom remotamente
+Lembrando que ja instalamos o nginx, vamos utilizar essa memsa instalaçao. Na pasta taskes do nginx, vamos pedir para ele criar uma pasta em roles/install_nginx/tasks/main.yml e entao copiar para essa pasta o package.json, de onde fazemos a instalaçao do express.
+
+```yaml
+---
+- name: Install nginx
+  apt:
+    pkg:
+      - nginx
+      - nodejs
+      - npm
+    state: present
+    update_cache: yes
+
+- name: Init nginx
+  service:
+    name: nginx
+    state: started
+
+- name: create dir /app
+  file:
+    path: /app
+    state: directory
+
+- name: copy package.json
+  copy: 
+    src: package.json
+    dest: /app/package.json
+
+- name: npm install
+  npm:
+    path: /app
+    state: present
+```
+E vamos copiar o package.json de app/files e vamos colar em install_nginx/files manualmente.
+E entao toda vez que rodarmos isso ele vai subir para o servidor. E assim que ele subir, ele vai rodar o npm para nós 
+
+No arquivo roles/main.yaml vamos executar apenas o nginx
+```yaml
+- hosts: all
+  become: true
+  vars:
+    arch_mapping:  # Map ansible architecture {{ ansible_architecture }} names to Docker's architecture names
+      x86_64: amd64
+      aarch64: arm64
+  roles:
+    - install_nginx
+    # - install_docker
+
+# - hosts: manager
+#   become: true
+#   vars:
+#     arch_mapping:
+#       x86_64: amd64
+#       aarch64: arm64
+#   roles:
+#     - docker_swarm_manager
+
+# - hosts: worker
+#   become: true
+#   vars:
+#     arch_mapping:
+#       x86_64: amd64
+#       aarch64: arm64
+#   roles:
+#     - docker_swarm_worker
+
+# - hosts: manager
+#   become: true
+#   vars:
+#     arch_mapping:
+#       x86_64: amd64
+#       aarch64: arm64
+#   roles:
+#     - deploy_stack
+```
+
+E vamos rodar
+```bash
+❯ cd ../roles 
+❯ ansible-playbook -i ../hosts main.yaml
+
+PLAY [all] ********************************************************************************************************
+
+TASK [Gathering Facts] ********************************************************************************************
+ok: [3.144.93.48]
+ok: [18.117.78.52]
+ok: [3.138.126.106]
+
+TASK [install_nginx : Install nginx] ******************************************************************************
+changed: [3.144.93.48]
+changed: [3.138.126.106]
+changed: [18.117.78.52]
+
+TASK [install_nginx : Init nginx] *********************************************************************************
+ok: [3.144.93.48]
+ok: [3.138.126.106]
+ok: [18.117.78.52]
+
+TASK [install_nginx : create dir /app] ****************************************************************************
+ok: [3.144.93.48]
+ok: [18.117.78.52]
+ok: [3.138.126.106]
+
+TASK [install_nginx : copy package.json] **************************************************************************
+ok: [3.144.93.48]
+ok: [3.138.126.106]
+ok: [18.117.78.52]
+
+TASK [install_nginx : npm install] ********************************************************************************
+changed: [3.144.93.48]
+changed: [3.138.126.106]
+changed: [18.117.78.52]
+
+PLAY RECAP ********************************************************************************************************
+18.117.78.52               : ok=6    changed=2    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0   
+3.138.126.106              : ok=6    changed=2    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0   
+3.144.93.48                : ok=6    changed=2    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0
+```
+
+E entao vamos acessar via ssh uma das maquinas e verificar se os arquivos estao lá!
+```bash
+❯ ssh -i ../aws-ansible.pem ubuntu@18.117.78.52
+Welcome to Ubuntu 22.04.3 LTS (GNU/Linux 6.2.0-1017-aws x86_64)
+
+ * Documentation:  https://help.ubuntu.com
+ * Management:     https://landscape.canonical.com
+ * Support:        https://ubuntu.com/advantage
+
+  System information as of Thu Feb 15 20:57:53 UTC 2024
+
+  System load:                      0.080078125
+  Usage of /:                       62.9% of 7.57GB
+  Memory usage:                     41%
+  Swap usage:                       0%
+  Processes:                        109
+  Users logged in:                  0
+  IPv4 address for docker0:         172.17.0.1
+  IPv4 address for docker_gwbridge: 172.18.0.1
+  IPv4 address for eth0:            172.31.12.50
+
+ * Ubuntu Pro delivers the most comprehensive open source security and
+   compliance features.
+
+   https://ubuntu.com/aws/pro
+
+Expanded Security Maintenance for Applications is not enabled.
+
+31 updates can be applied immediately.
+2 of these updates are standard security updates.
+To see these additional updates run: apt list --upgradable
+
+Enable ESM Apps to receive additional future security updates.
+See https://ubuntu.com/esm or run: sudo pro status
 
 
+*** System restart required ***
+Last login: Thu Feb 15 20:55:29 2024 from 189.8.23.170
+ubuntu@ip-172-31-12-50:~$ ls /app
+node_modules  package-lock.json  package.json
+```
 
+Estão lá!
 
+Vamos copiar o app/files/index.js para dentro do roles/install_nginx/files
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+## Trabalhando copm templates
 
 
 
