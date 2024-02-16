@@ -9,3 +9,4 @@
 #ansible_ssh_private_key_file=/home/rogerio/Git/SmartCampusMaua/Docs/DevOps/Ansible/ansible-aws/aws-ansible.pem
 ansible_ssh_private_key_file=/Users/rogeriocassares/Git/SmartCampusMaua/Docs/DevOps/Ansible/ansible-aws/aws-ansible.pem
 ansible_user=ubuntu
+

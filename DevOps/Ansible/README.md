@@ -3574,16 +3574,272 @@ Esse sao exemplos de como podemos fazer!
 
 Vamos fazer com que o nginx receba as solicitaçoes e rodando como se fosse um serviço qualquer.
 
+## Criando Service para nossa app
+Na doc do ansible existe um resumo de como usar o jinja 2 como template
+
+Ba hora em qye subrinos a noissa aplca;cao podemos deixar rodando como padrao. Mas vamos fazer de forma que ela rode como um systemd as a service!
+
+Dentro da pasta files vamos criar um arquivo chamado app.service 
+```service
+[Service]
+WorkingDirectory=/app
+ExecStart=/usr/bin/node index.js
+Restart=always
+StandardOutput=syslog
+StandardError=syslog
+SyslogIdentifier=app-node
+user=root
+group=root
+```
+
+E vamos copiar esse arquivp para o server! Em install_nginx/tasks/main.yml
+```yaml
+---
+- name: Install nginx
+  apt:
+    pkg:
+      - nginx
+      - nodejs
+      - npm
+    state: present
+    update_cache: yes
+
+- name: Init nginx
+  service:
+    name: nginx
+    state: started
+
+- name: create dir /app
+  file:
+    path: /app
+    state: directory
+
+- name: copy package.json
+  copy: 
+    src: package.json
+    dest: /app/package.json
+
+- name: npm install
+  npm:
+    path: /app
+    state: present
+
+- name: copy index.js
+  template: 
+    src: index.js.j2
+    dest: /app/index.js
+
+- name: copy app.service
+  copy: 
+    src: app.service
+    dest: /etc/systemd/system/app.service
+
+- name: enable app.service
+  systemd:
+    name: app
+    enabled: yes
+
+- name: run app.service
+  systemd:
+    name: app
+    state: started
+```
+
+E vamos executar
+```bash
+
+```
+
+E verificar se está rodando
+http://18.117.78.52:3002/
+http://3.138.126.106:3002/
+http://3.144.93.48:3002/
+
+E funciuonou! Agora vamos fazer o nginx acessar essa pasta e vamos chamar pelo ngunx como proxy reverso de forma interna.
 
 
+## Configurando nginx como proxy reverso
+Vamos acessar o nginx pela porta 80 e ele ir para a nossa aplicaçao na porta 3002.
+
+Vamos criar um arquivo de configuraçao em templates/nginx.conf.j2
+```j2
+server {
+    listen 80;
+    location / {
+        proxy_pass {{ url_app }};
+    }
+}
+```
+
+E agora conseguimos colocar como variaavel qual vai ser a nossa aplicaçao na pasta varts/main.yml
+```yaml
+---
+# vars file for install_nginx
+hello_fullcycle: "Hello Full Cycle!!!"
+url_app: "http://localhost:3002"
+```
+
+No arquivo de configuraçao tasks/main.yml, vamos copiar o arquivo de templates usando as vars para dentro do dretorio do nginc nas maquinas EC2 e assim que ele copie ele deve recarregar o nginx. Toda a vez que mexemos no nginx temos que fazer um reload. Esse tipo de chamada é uma chamada padrao e precisa ser executada. Por conta disso, o ansible tem uma forma de nos aunxiliar com os handlers! O handler é sempre executado quando alguma coisa acontece.
+
+handlers/main.yml
+```yaml
+---
+# handlers file for install_nginx
+- name: reload nginx
+  systemd:
+    name: nginx
+    state: reloaded
+```
+
+Em tasks/main.yml vamos colocar um notify para recarregar o nginx a partir do nome do handler!
+```yaml
+---
+- name: Install nginx
+  apt:
+    pkg:
+      - nginx
+      - nodejs
+      - npm
+    state: present
+    update_cache: yes
+
+- name: Init nginx
+  service:
+    name: nginx
+    state: started
+
+- name: create dir /app
+  file:
+    path: /app
+    state: directory
+
+- name: copy package.json
+  copy: 
+    src: package.json
+    dest: /app/package.json
+
+- name: npm install
+  npm:
+    path: /app
+    state: present
+
+- name: copy index.js
+  template: 
+    src: index.js.j2
+    dest: /app/index.js
+
+- name: copy app.service
+  copy: 
+    src: app.service
+    dest: /etc/systemd/system/app.service
+
+- name: enable app.service
+  systemd:
+    name: app
+    enabled: yes
+
+- name: run app.service
+  systemd:
+    name: app
+    state: started
+
+- name: copy nginx.conf
+  template:
+    src: nginx.conf.j2
+    dest: /etc/nginx/sites-available/default
+  notify: reload nginx
+```
+
+E ntao, estamos usando, handlers, tasks, templates, var e estes sai os poricipais que vamos utilizar.
+
+Vamos verificar se está tudo ok!
+
+```bash
+❯ ansible-playbook -i ../hosts main.yaml
+
+PLAY [all] ********************************************************************************************************
+
+TASK [Gathering Facts] ********************************************************************************************
+ok: [3.144.93.48]
+ok: [18.117.78.52]
+ok: [3.138.126.106]
+
+TASK [install_nginx : Install nginx] ******************************************************************************
+ok: [3.144.93.48]
+ok: [3.138.126.106]
+ok: [18.117.78.52]
+
+TASK [install_nginx : Init nginx] *********************************************************************************
+ok: [3.144.93.48]
+ok: [18.117.78.52]
+ok: [3.138.126.106]
+
+TASK [install_nginx : create dir /app] ****************************************************************************
+ok: [3.138.126.106]
+ok: [3.144.93.48]
+ok: [18.117.78.52]
+
+TASK [install_nginx : copy package.json] **************************************************************************
+ok: [3.138.126.106]
+ok: [18.117.78.52]
+ok: [3.144.93.48]
+
+TASK [install_nginx : npm install] ********************************************************************************
+ok: [3.138.126.106]
+ok: [3.144.93.48]
+ok: [18.117.78.52]
+
+TASK [install_nginx : copy index.js] ******************************************************************************
+ok: [3.138.126.106]
+ok: [18.117.78.52]
+ok: [3.144.93.48]
+
+TASK [install_nginx : copy app.service] ***************************************************************************
+ok: [3.138.126.106]
+ok: [3.144.93.48]
+ok: [18.117.78.52]
+
+TASK [install_nginx : enable app.service] *************************************************************************
+ok: [3.138.126.106]
+ok: [18.117.78.52]
+ok: [3.144.93.48]
+
+TASK [install_nginx : run app.service] ****************************************************************************
+ok: [3.138.126.106]
+ok: [3.144.93.48]
+ok: [18.117.78.52]
+
+TASK [install_nginx : copy nginx.conf] ****************************************************************************
+changed: [3.138.126.106]
+changed: [3.144.93.48]
+changed: [18.117.78.52]
+
+RUNNING HANDLER [install_nginx : reload nginx] ********************************************************************
+changed: [3.138.126.106]
+changed: [3.144.93.48]
+changed: [18.117.78.52]
+
+PLAY RECAP ********************************************************************************************************
+18.117.78.52               : ok=12   changed=2    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0   
+3.138.126.106              : ok=12   changed=2    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0   
+3.144.93.48                : ok=12   changed=2    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0
+```
+
+E verificar se está rodando
+http://18.117.78.52:80/
+http://3.138.126.106:80/
+http://3.144.93.48:80/
 
 
+E funcionou!
 
+## Considerações Finais
+Com o Ansible, consegumos instalar diversos recursos como nginx, proxy reverso do nginx, docker e cluster swarm nas EC2 paenas rodando as roles de forma totalmenter automatizada!
 
+Terraform -> Provisiona
+Ansible -> Configura
 
-
-
-
+Podemos tb rodar tarefas na maquina local como comandos com kubectl, por exemplo
 
 
 
