@@ -3,6 +3,7 @@
 ## Email
 
 In Grafana, go to _Menu_ -> _Alert & IRM_ -> _Alerting_ -> _Contact points_ -> `+ Add contact point`
+
 ![alt text](./_lib/img/screen-contact-points-page.png)
 ![alt text](./_lib/img/screen-contact-points-add.png)
 
@@ -21,3 +22,7 @@ If all runs well, you can save the contact point by clicking on the `Save contac
 And you should receive a email message like this:
 
 ![alt text](./_lib/img/screen-email-notification.png)
+
+## Telegram
+
+For this example, it was used for reference the [Grafana Alerting + Telegram](https://grafana.com/blog/2023/12/28/how-to-integrate-grafana-alerting-and-telegram/).
