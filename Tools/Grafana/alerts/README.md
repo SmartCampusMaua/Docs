@@ -64,5 +64,38 @@ To create a new alert rule, go to _Menu_ -> _Alert & IRM_ -> _Alert rules_ -> `+
 
 ![alt text](./_lib/img/screen-alert-rules-add.png)
 
-Then, select the data source, the condition, and the contact point that you want to use to send the alert.
+Then, enter a rule name, select the data source, the expression or conditions, and the contact point that you want to use to send the alert.
 
+To get the `data_temperature` it was used the _Query_
+
+```sql
+SELECT data_temperature, time
+FROM "SmartLights"
+WHERE
+time >= now() - interval '3 hour'
+AND "nodeName" = 'M-033'
+```
+
+![alt text](./_lib/img/screen-alert-rules-query.png)
+
+In the _Expression_ field, you can use _Math_ or _Operations_ to create the condition. In this example, it was used the _Expression_ `Reduce` and `Threshold` to create a condition that will send an alert when temperature is above 27°C.
+
+![alt text](./_lib/img/screen-alert-rules-expressions.png)
+
+Then, set a _Folder_, _Evaluation_ and _Pending Group_. This option evaluated your rule in a specific time range and send the alert if the condition is true.
+
+![alt text](./_lib/img/screen-alert-rules-evaluation.png)
+
+Select a contact point.
+
+![alt text](./_lib/img/screen-alert-rules-notification.png)
+
+You can add a _Annotation_.
+
+![alt text](./_lib/img/screen-alert-rules-annotations.png)
+
+And then, save the alert rule.
+
+If all gone right, you should receive a message in the contact point that you set up. It that case, it was used the Telegram.
+
+![alt text](./_lib/img/screen-telegram-alert.png)
